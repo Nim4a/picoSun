@@ -1,0 +1,20 @@
+# venv / build artifacts
+.venv/
+build/
+dist/
+__pycache__/
+*.spec
+
+# scratch probes from dev sessions
+zz_*.py
+zz_*.txt
+*.log
+*.ini
+nul
+
+# test media (regenerated locally)
+bigpics/
+refpics/
+testpics/
+heictest/
+mixtest/
