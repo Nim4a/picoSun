@@ -259,6 +259,10 @@ class NavBar(QFrame):
             f"color:#a6a6ae;background:transparent;font-size:10px;")
         self.lbl_zoom = QLabel("Fit")
         self.lbl_zoom.setAlignment(Qt.AlignCenter)
+        # fixed width: the zoom text changes ("Fit" / "100%" / "" when no photo),
+        # and a label that widens after _refit measured the row is what pushed
+        # the last window button past the bar's right edge at ~900px.
+        self.lbl_zoom.setFixedWidth(46)
         self.lbl_zoom.setStyleSheet(
             f"color:#6a6a72;background:transparent;font-size:10px;")
 
@@ -463,6 +467,25 @@ class NavBar(QFrame):
         self.btn_open.setVisible(id(self.btn_open) in shown)
         self.btn_strip.setVisible(id(self.btn_strip) in shown)
 
+        # The sizeHint arithmetic above runs a few px optimistic, which at some
+        # widths pushed the last window button past the bar's right edge. Measure
+        # what the row really needs and drop the least essential control until
+        # it fits, ending on Exit (the only way out of a frameless window).
+        rlay = self.right_col.layout()
+        for _ in range(4):
+            rlay.activate()
+            if rlay.minimumSize().width() <= col:
+                break
+            for wd in (self.btn_strip, self.btn_open, self.win_col):
+                if wd.isVisible():
+                    wd.setVisible(False)
+                    if wd is self.win_col:
+                        self.btn_exit.setVisible(True)
+                    break
+            else:
+                break
+        self.right_col.setFixedWidth(col)
+
     def _winbtn(self, glyph, tip, sig, w=30, h=26):
         """A caption-less square button, the way a title bar draws them.
 
@@ -536,7 +559,7 @@ class NavBar(QFrame):
         p = QPainter(self)
         # the control bar is the smoked-glass pane: darker scrim, so text stays
         # legible while the photo still glows through
-        paint_glass(self, p, scrim=QColor(10, 12, 18, 120), sheen=84)
+        paint_glass(self, p, scrim=QColor(14, 16, 22, 180), sheen=84)
         p.end()
 
 
