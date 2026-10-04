@@ -359,8 +359,12 @@ class Viewer(QMainWindow):
         self.info.setVisible(info_on)
         self.panel.setVisible(edit_on)
         self._sync_side()
-        # first launch goes straight to fullscreen, like Picasa did
-        want_full = first_run or bool(self.settings.value("fullscreen", False, bool))
+        # first launch goes straight to fullscreen, like Picasa did. A missing
+        # `fullscreen` key counts as first launch too: the app used to open
+        # windowed for anyone whose saved state was written before the key ever
+        # existed, so a plain install never came up fullscreen. closeEvent
+        # always writes the key, so an explicit windowed close still sticks.
+        want_full = first_run or bool(self.settings.value("fullscreen", True, bool))
         QTimer.singleShot(0, self._enter_fullscreen if want_full else self._center)
 
     def _center(self):
@@ -575,6 +579,9 @@ class Viewer(QMainWindow):
             return True
         self.close_player()
         self.settings.setValue("last_dir", os.path.dirname(path))
+        # an explicit open is the point to re-read the folder (the wheel's
+        # _select reuses the cached listing while paging inside one folder)
+        self._scan_cache = None
         # The strip's wheel walk waits on this flag: a real photo blocks the UI
         # thread for a few hundred ms, and stepping again mid-decode is what
         # made the strip feel like it was spinning.
@@ -713,17 +720,26 @@ class Viewer(QMainWindow):
 
     def _scan(self, path: str):
         folder = os.path.dirname(path) or "."
-        files = []
-        try:
-            for n in os.listdir(folder):
-                if Path(n).suffix.lower() in MEDIA_EXTS:
-                    files.append(os.path.join(folder, n))
-        except OSError:
-            pass
-        # photos first, then videos -- how Picasa grouped a folder
-        files.sort(key=lambda pp: (Path(pp).suffix.lower() in VIDEO_EXTS,
-                                   _natural(Path(pp).stem)))
         key = os.path.normcase(path)
+        # The wheel calls this on EVERY notch; re-listing and re-sorting the
+        # directory each time is what made a long folder scroll feel heavy.
+        # Reuse the listing while the folder is unchanged (a page turn inside
+        # one folder never needs a fresh listdir).
+        cache = getattr(self, "_scan_cache", None)
+        if cache and cache[0] == folder:
+            files = cache[1]
+        else:
+            files = []
+            try:
+                for n in os.listdir(folder):
+                    if Path(n).suffix.lower() in MEDIA_EXTS:
+                        files.append(os.path.join(folder, n))
+            except OSError:
+                pass
+            # photos first, then videos -- how Picasa grouped a folder
+            files.sort(key=lambda pp: (Path(pp).suffix.lower() in VIDEO_EXTS,
+                                       _natural(Path(pp).stem)))
+            self._scan_cache = (folder, files)
         for i, p in enumerate(files):
             if os.path.normcase(p) == key:
                 self.folder, self.index = files, i

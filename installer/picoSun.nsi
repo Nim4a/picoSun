@@ -25,6 +25,10 @@ XPStyle on
 
 Section "Install"
   SetOutPath "$INSTDIR"
+  # A fresh install is a fresh start: drop the saved window state so the app
+  # comes up fullscreen on first launch instead of inheriting a windowed
+  # geometry from an older build (the setting lives beside the app's own key).
+  DeleteRegKey HKCU "Software\picoSun\picoSun"
   File /r "..\dist\picoSun\*.*"
   File /r "..\picoSun.ico"
   WriteUninstaller "$INSTDIR\uninstall.exe"

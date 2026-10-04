@@ -316,11 +316,15 @@ class PhotoView(QWidget):
         d = ev.angleDelta().y() or ev.angleDelta().x()
         if d == 0:
             return
-        if self._over_photo(ev.position()):
-            # on the picture: zoom, keeping the pixel under the pointer still
+        if ev.modifiers() & Qt.ControlModifier:
+            # Ctrl+wheel zooms, the convention every image viewer shares
             self.step_zoom(1 if d > 0 else -1, ev.position())
         else:
-            # on the empty letterbox around it: walk through the folder
+            # Plain wheel walks the folder, whether the pointer is on the
+            # picture or on the letterbox around it. It used to zoom whenever
+            # the pointer was over the photo, so scrolling looked like it only
+            # blurred the image and the filmstrip never followed (no page turn
+            # had happened -- you had to click the strip to move at all).
             self.wheelStepped.emit(1 if d < 0 else -1)
         ev.accept()
 
