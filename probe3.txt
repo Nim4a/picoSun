@@ -1,6 +1,0 @@
-first-run isFullScreen=True (want True)
-folder=3 strip items=3
-start: current=pic1.jpg strip_current=pic1.jpg
-after wheel 1: current=pic2.jpg strip_current=pic2.jpg strip_caption=2 / 3
-after wheel 2: current=pic3.jpg strip_current=pic3.jpg strip_caption=3 / 3
-after wheel 3: current=pic3.jpg strip_current=pic3.jpg strip_caption=3 / 3
