@@ -19,7 +19,7 @@ from PySide6.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
                            QPolygon)
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QSizePolicy, QStyledItemDelegate,
-                               QWidget)
+                               QStyle, QWidget)
 
 import pv_core as core
 from pv_ui_common import pil_to_pixmap
@@ -30,7 +30,10 @@ VIDEO_EXTS = {
 }
 MEDIA_EXTS = core.IMAGE_EXTS | VIDEO_EXTS
 
-THUMB_W, THUMB_H = 70, 44          # small tiles; the strip is now 56px tall
+# Picasa measurements: strip ~50px tall, tiles 30x49 on a 31px pitch with a
+# 1px black gutter, thin blue selection frame. Scrollbar hidden -- the strip
+# glides to the current tile instead.
+THUMB_W, THUMB_H = 30, 44          # icon box; delegate paints cover below
 
 FFMPEG = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
 FFPROBE = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
@@ -187,7 +190,7 @@ class _StripList(QListWidget):
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setIconSize(QSize(THUMB_W, THUMB_H))
-        self.setGridSize(QSize(THUMB_W + 6, THUMB_H + 8))
+        self.setGridSize(QSize(31, 49))
         self.setUniformItemSizes(True)
         self.setSpacing(0)
         self.setItemDelegate(TileDelegate(self))
@@ -303,7 +306,8 @@ class PreviewBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(56)
+        # Picasa: strip rides the bottom edge, ~50px tall, near-black
+        self.setFixedHeight(50)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.paths: list[str] = []
         self.videos: set[str] = set()
@@ -316,7 +320,7 @@ class PreviewBar(QWidget):
         self._paths_to_load: list[str] = []
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(3, 1, 3, 1)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         self.list = _StripList(self)
         lay.addWidget(self.list)
@@ -329,16 +333,23 @@ class PreviewBar(QWidget):
         self.caption.hide()
 
     # ------------------------------------------------------------------ loading
+    def _store_thumb(self, item: QListWidgetItem, pm):
+        # cover painting lives in the delegate (_PIXMAP_ROLE); the icon must
+        # stay EMPTY or QListWidget paints a second contained copy on top
+        item.setData(_PIXMAP_ROLE, pm)
+        item.setIcon(QIcon())
+
     def load(self, paths: list[str]):
         self.paths = list(paths)
         self.videos = {p for p in paths if Path(p).suffix.lower() in VIDEO_EXTS}
         self.list.clear()
         self._pending.clear()
+        empty = QPixmap()
         for p in self.paths:
-            pm = placeholder(p)
             item = QListWidgetItem()               # thumbnail only, no filename text
             item.setData(Qt.UserRole, p)
-            item.setIcon(QIcon(pm))
+            item.setData(_PIXMAP_ROLE, empty)
+            item.setIcon(QIcon())
             item.setToolTip(Path(p).name)
             self.list.addItem(item)
             self._pending[p] = item
@@ -353,14 +364,12 @@ class PreviewBar(QWidget):
             job = _Job(self._sig, path, path in self.videos)
             job.setAutoDelete(True)
             QThreadPool.globalInstance().start(job)
-            if len(self._paths_to_load) < 0:      # submit all; the pool queues them
-                break
 
     def _on_thumb(self, path: str, pm):
         item = self._pending.get(path)
         if item is None:
             return
-        item.setIcon(QIcon(pm))
+        self._store_thumb(item, pm)
         if Path(path).suffix.lower() in VIDEO_EXTS:
             self._mark_video(item)
 
@@ -395,11 +404,8 @@ class PreviewBar(QWidget):
         for i in range(self.list.count()):
             it = self.list.item(i)
             if os.path.normcase(it.data(Qt.UserRole)) == os.path.normcase(path):
-                icon = it.icon()
-                if icon.isNull():
-                    return None
-                sizes = icon.availableSizes()
-                return icon.pixmap(sizes[0]) if sizes else None
+                pm = it.data(_PIXMAP_ROLE)
+                return pm if isinstance(pm, QPixmap) and not pm.isNull() else None
         return None
 
     def reveal(self, path: str):
@@ -439,15 +445,35 @@ class PreviewBar(QWidget):
 
 _DURATION_ROLE = Qt.UserRole + 1
 _IS_VIDEO_ROLE = Qt.UserRole + 2
+_PIXMAP_ROLE = Qt.UserRole + 3
 
 
 class TileDelegate(QStyledItemDelegate):
-    """Draws each tile: the thumbnail, a play badge for videos and the duration."""
+    """Draws each tile: cover-fill thumbnail, play badge, duration.
+
+    Cover, not contain: the tile is a window onto the photo, so the
+    thumbnail is scaled to FILL the tile rect and centre-cropped -- the
+    continuous-ticker look. QListWidget's own icon painting stays OFF
+    (return an empty pixmap); leaving it on draws a second, contained copy
+    on top of the cover fill.
+    """
 
     def paint(self, painter: QPainter, option, index):
-        super().paint(painter, option, index)
-        painter.save()
         r = option.rect
+        painter.save()
+        painter.setClipRect(r)
+        store = index.data(_PIXMAP_ROLE)
+        pm = store if isinstance(store, QPixmap) and not store.isNull() else None
+        if pm is not None:
+            s = max(r.width() / max(pm.width(), 1),
+                    r.height() / max(pm.height(), 1))
+            dw, dh = int(pm.width() * s), int(pm.height() * s)
+            dx = r.x() + (r.width() - dw) // 2
+            dy = r.y() + (r.height() - dh) // 2
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(dx, dy, dw, dh, pm)
+        else:
+            painter.fillRect(r, QColor(38, 38, 40))
         if index.data(_IS_VIDEO_ROLE):
             tri = QPolygon([
                 QPoint(r.center().x() - 6, r.center().y() - 9),
@@ -470,21 +496,24 @@ class TileDelegate(QStyledItemDelegate):
             painter.setFont(f)
             painter.setPen(QColor(238, 238, 238))
             painter.drawText(plate, Qt.AlignCenter, dur)
+        if option.state & QStyle.State_Selected:
+            painter.setPen(QPen(QColor(0x2f, 0x7f, 0xc4), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(r.adjusted(1, 1, -1, -1))
         painter.restore()
 
     def sizeHint(self, option, index):
         # fixed tile: the filename under the thumbnail must not stretch the strip
-        return QSize(THUMB_W + 6, THUMB_H + 8)
+        return QSize(31, 49)
 
 _STRIP_QSS = """
-QListWidget{background:transparent;border:none;outline:none;}
-QListWidget::item{border:2px solid transparent;border-radius:3px;margin:0px 1px;
- background:transparent;}
-QListWidget::item:hover{border:2px solid rgba(150,150,155,140);}
-QListWidget::item:selected{border:2px solid #4a90d9;background:rgba(74,144,217,60);}
-QScrollBar:horizontal{height:7px;background:transparent;margin:0;}
-QScrollBar::handle:horizontal{background:rgba(160,160,165,110);border-radius:3px;
- min-width:24px;}
+QListWidget{background:#08090c;border:none;outline:none;}
+QListWidget::item{border:1px solid #000;border-radius:0px;margin:0px;
+ background:#08090c;}
+QListWidget::item:hover{border:1px solid #7a7a80;}
+QListWidget::item:selected{border:2px solid #2f7fc4;background:#08090c;}
+QScrollBar:horizontal{height:0px;background:transparent;margin:0;}
+QScrollBar::handle:horizontal{background:transparent;}
 QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0;height:0;}
 QScrollBar::add-page:horizontal,QScrollBar::sub-page:horizontal{background:transparent;}
 """
