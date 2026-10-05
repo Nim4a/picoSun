@@ -132,13 +132,14 @@ class Chrome(QWidget):
         self.btn_close = QPushButton("✕", self)
         # Permanent Exit at the top-right. It used to live only in the bottom
         # bar, which is hidden in fullscreen; the title bar is the place a user
-        # looks for "get me out", so it lives here now.
-        self.btn_exit = QPushButton("⎋", self)
+        # looks for "get me out", so it lives here now. In fullscreen it
+        # leaves fullscreen (never quits); windowed it closes the app.
+        self.btn_exit = QPushButton("⤢", self)
         for b in (self.btn_min, self.btn_max, self.btn_close, self.btn_exit):
             b.setAttribute(Qt.WA_StyledBackground, True)
         self.btn_close.setObjectName("titleClose")
         self.btn_exit.setObjectName("titleExit")
-        self.btn_exit.setToolTip("Exit picoSun  (Alt+F4)")
+        self.btn_exit.setToolTip("Leave fullscreen  (F)")
         self.btn_exit.setFixedSize(42, 30)
         self.btn_exit.setFocusPolicy(Qt.NoFocus)
         self.btn_exit.setCursor(Qt.ArrowCursor)
