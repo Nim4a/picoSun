@@ -1433,14 +1433,11 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """80%-opaque dark backdrop: frosted glass, not a black slab.
+        """100% transparent: paint nothing, the desktop shows straight through.
 
-        Alpha ~200 lets the desktop glow faintly through the dark tint.
-        Opaque black was the "black and dull" complaint; fully transparent
-        washed white on Win32 layered windows. This is the middle.
+        Only the photo, the bars and the thumbnail tiles paint themselves;
+        everything else is the user's own wallpaper.
         """
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor(13, 16, 23, 200))
 
     def closeEvent(self, ev):
         self.close_player()
