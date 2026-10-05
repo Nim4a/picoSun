@@ -1434,21 +1434,17 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Opaque dark backdrop over the whole window + DWM blur = frost.
+        """Opaque dark backdrop over the whole window.
 
         Per-pixel alpha on this Win32 layered window composites against
         BLACK, not the desktop, so translucency can never show the
         wallpaper -- it only washes the fill toward gray (that was the
-        "white theme"). Opaque dark paint + real DWM acrylic blur behind
-        the window is what reads as frosted glass.
+        "white theme"). DWM acrylic is enabled once in main(), not here:
+        calling SetWindowCompositionAttribute every paint is what smeared
+        the frame white.
         """
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(13, 16, 23))
-        try:
-            from pv_glass import enable_acrylic
-            enable_acrylic(int(self.winId()))
-        except Exception:
-            pass
 
     def closeEvent(self, ev):
         self.close_player()
