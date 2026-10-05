@@ -41,8 +41,8 @@ def enable_acrylic(hwnd: int, tint: int = 0x3AF0F6FC) -> bool:
 
 
 def paint_glass(widget, p: QPainter,
-                scrim: QColor = QColor(16, 18, 24, 130),
-                sheen: int = 40):
+                scrim: QColor = QColor(16, 18, 24, 60),
+                sheen: int = 25):
     """Frosted dark glass -- the bars never sample the photo.
 
     Frosted = dark + more transparent + weak sheen: the desktop blur shows

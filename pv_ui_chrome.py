@@ -203,7 +203,8 @@ class Chrome(QWidget):
     def paintEvent(self, ev):
         from pv_glass import paint_glass
         p = QPainter(self)
-        paint_glass(self, p)
+        # windowed bars: frosted but airy -- the wallpaper glows through
+        paint_glass(self, p, scrim=QColor(16, 18, 24, 60), sheen=25)
         p.end()
 
 
@@ -557,9 +558,8 @@ class NavBar(QFrame):
     def paintEvent(self, ev):
         from pv_glass import paint_glass
         p = QPainter(self)
-        # the control bar is the frosted pane: dark translucent, photo glows
-        # through but stays readable
-        paint_glass(self, p, scrim=QColor(16, 18, 24, 130), sheen=40)
+        # the control bar is the frosted pane: airy, wallpaper glows through
+        paint_glass(self, p, scrim=QColor(16, 18, 24, 60), sheen=25)
         p.end()
 
 
@@ -668,5 +668,6 @@ class InfoPanel(QFrame):
     def paintEvent(self, ev):
         from pv_glass import paint_glass
         p = QPainter(self)
-        paint_glass(self, p)
+        # info panel: same airy frost as the bars
+        paint_glass(self, p, scrim=QColor(16, 18, 24, 60), sheen=25)
         p.end()
