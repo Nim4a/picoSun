@@ -185,9 +185,11 @@ class Viewer(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        # Normal (non-layered) window: DWM owns the frame, the backdrop is
-        # just dark paint. Layered translucency composited against black on
-        # Win32, which is what washed everything white.
+        # Layered + translucent: per-pixel alpha. The backdrop fill is 80%
+        # opaque dark (alpha ~200), so the window is mostly itself with the
+        # desktop glowing faintly through -- frosted glass, not black slab.
+        # (Fully opaque dark was the "black and dull" complaint.)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMinimumSize(560, 380)
         self.settings = self.SETTINGS or QSettings(APP_NAME, APP_NAME)
 
@@ -1431,17 +1433,14 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Opaque dark backdrop over the whole window.
+        """80%-opaque dark backdrop: frosted glass, not a black slab.
 
-        Per-pixel alpha on this Win32 layered window composites against
-        BLACK, not the desktop, so translucency can never show the
-        wallpaper -- it only washes the fill toward gray (that was the
-        "white theme"). DWM acrylic is enabled once in main(), not here:
-        calling SetWindowCompositionAttribute every paint is what smeared
-        the frame white.
+        Alpha ~200 lets the desktop glow faintly through the dark tint.
+        Opaque black was the "black and dull" complaint; fully transparent
+        washed white on Win32 layered windows. This is the middle.
         """
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(13, 16, 23))
+        p.fillRect(self.rect(), QColor(13, 16, 23, 200))
 
     def closeEvent(self, ev):
         self.close_player()
