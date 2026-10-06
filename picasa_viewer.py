@@ -1449,11 +1449,16 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """100% transparent: paint nothing, the desktop shows straight through.
+        """Frosted glass backdrop: dark blur tint, blur comes from DWM.
 
-        Only the photo, the bars and the thumbnail tiles paint themselves;
-        everything else is the user's own wallpaper.
+        The window is layered + translucent (WA_TranslucentBackground), so
+        this fill's alpha is real: 38/255 lets the wallpaper glow through
+        the dark tint like frosted glass. Opaque black was the "black slab"
+        complaint; painting nothing washed white on Win32.
         """
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(13, 16, 23, 38))
 
     def closeEvent(self, ev):
         self.close_player()
