@@ -1449,18 +1449,11 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Near-clear backdrop: the BLUR comes from DWM acrylic (main).
+        """Clear glass: paint nothing, wallpaper shows straight through.
 
-        This fill is almost nothing (alpha 8) -- just enough for the
-        layered window to composite. The frosted-glass look (blurred
-        wallpaper through dark tint) is done by SetWindowCompositionAttribute
-        in main(), which blurs what is BEHIND the window. Paint fills alone
-        can only tint, never blur -- that is why every fillRect-only attempt
-        read as flat gray instead of glass.
+        No tint, no blur -- the desktop behind is fully visible like a
+        clean window pane. Only the photo, bars and tiles paint themselves.
         """
-        from PySide6.QtGui import QPainter, QColor
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor(13, 16, 23, 8))
 
     def closeEvent(self, ev):
         self.close_player()
@@ -1579,16 +1572,6 @@ def main() -> int:
     except Exception:
         pass
     w.show()
-    try:
-        # Real DWM acrylic blur, once: dark tint (0x14 = 20 alpha) so the
-        # wallpaper blurs THROUGH the window instead of just darkening.
-        # This is the only thing that gives true frosted glass; paint fills
-        # alone can only tint, never blur.
-        from pv_glass import enable_acrylic
-        enable_acrylic(int(w.winId()),
-                       tint=0x140D1017)  # AABBGGRR: alpha 20, #17100D
-    except Exception:
-        pass
     return app.exec()
 
 
