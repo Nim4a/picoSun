@@ -1511,6 +1511,10 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
                                  vw, strip_h)
         self.nav.raise_()
         self.preview.raise_()
+        # the floating fullscreen button must stay on top of everything:
+        # every raise_() above would otherwise bury it under the bars
+        if self._fs_exit.isVisible():
+            self._fs_exit.raise_()
 
 
 def first_media_in(folder: str) -> str | None:
