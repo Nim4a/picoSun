@@ -221,13 +221,14 @@ def decode(path: str) -> tuple[Image.Image | None, dict]:
 
 def _decode_raw(path: str, meta: dict) -> tuple[Image.Image, dict]:
     with rawpy.imread(path) as raw:
-        # 16-bit sRGB output keeps tone edits clean; size/iso come from LibRaw
+        # 16-bit sRGB output keeps tone edits clean; size/iso come from LibRaw.
+        # No use_raw_decoder kwarg: removed from rawpy's API (0.27 rejects it),
+        # and default postprocess already decodes full quality.
         arr = raw.postprocess(
             use_camera_wb=True,
             no_auto_bright=False,
             output_color=rawpy.ColorSpace.sRGB,
             half_size=False,
-            use_raw_decoder=False,
             output_bps=16,
         )
         ci = getattr(raw, "camera_info", None) or {}
@@ -240,8 +241,12 @@ def _decode_raw(path: str, meta: dict) -> tuple[Image.Image, dict]:
             "fnum": f"f/{ci.get('fnum'):g}" if isinstance(ci.get("fnum"), float) else "",
             "focal": _fmt_focal(ci.get(" focal") or ci.get("focal")),
             "raw_desc": desc.decode(errors="replace")[:400] if isinstance(desc, bytes) else str(desc or "")[:400],
+            # rawpy 0.27 dropped width_px/height_px from ImageSizes; the
+            # cropped width/height carries the same numbers.
             "raw_size": getattr(raw, "sizes", None) and (
-                raw.sizes.width, raw.sizes.height, raw.sizes.width_px, raw.sizes.height_px),
+                raw.sizes.width, raw.sizes.height,
+                getattr(raw.sizes, "width_px", raw.sizes.width),
+                getattr(raw.sizes, "height_px", raw.sizes.height)),
             "bit_depth": ci.get("bits_per_sample", ""),
         })
     a16 = arr.astype(np.uint16)
