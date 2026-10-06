@@ -616,6 +616,13 @@ class Viewer(QMainWindow):
         e.addAction(self._act("&Flip Horizontal", lambda: self.flip("h")))
         e.addAction(self._act("Flip &Vertical", lambda: self.flip("v")))
         e.addAction(self._act("&Crop…", self.begin_crop, "C"))
+        e.addAction(self._act("Color &Picker (click copies #hex)", self._toggle_color_picker, "K"))
+        e.addAction(self._act("Resize…", self._resize_dialog))
+        e.addAction(self._act("HDR &Tone Map…", self._hdr_dialog, "T"))
+        e.addSeparator()
+        e.addAction(self._act("Frame &Next  .", lambda: self._frame_step(1), "."))
+        e.addAction(self._act("Frame &Previous  ,", lambda: self._frame_step(-1), ","))
+        e.addAction(self._act("Export &Frames…", self._frames_export))
 
         s = mb.addMenu("S&lideshow")
         self.a_slide = self._act("&Start Slideshow", self.toggle_slideshow, "F5")
@@ -652,6 +659,10 @@ class Viewer(QMainWindow):
         b("Shift+R", lambda: self.rotate(-90))
         b("F", self.toggle_fullscreen)
         b("F11", self.toggle_fullscreen)
+        b("K", self._toggle_color_picker)
+        b("T", self._hdr_dialog)
+        b(".", lambda: self._frame_step(1))
+        b(",", lambda: self._frame_step(-1))
         b("F5", self.toggle_slideshow)
         b("Enter", self._crop_confirm)
         b("Escape", self._escape)
@@ -725,6 +736,7 @@ class Viewer(QMainWindow):
         # so it counts as loading too
         if force_fit is None:
             force_fit = self.view.is_fit
+        self._frame_i = 0  # a new photo starts on frame 0
         if getattr(self, "_zoom_lock", False):
             # locked: keep this photo's zoom for the next one
             force_fit = False
@@ -1214,6 +1226,12 @@ class Viewer(QMainWindow):
         out = self.full_render()
         if out is None:
             return
+        # resize applies here, once, at save time -- never touches the master
+        side = getattr(self, "_export_side", 0)
+        if side and max(out.size) > side:
+            f = side / max(out.size)
+            out = out.resize((max(1, int(out.width * f)), max(1, int(out.height * f))),
+                             PILImage.LANCZOS)
         src = self.current()
         dst = src
         if overwrite and Path(src).suffix.lower() in core.RAW_EXTS:
@@ -1223,10 +1241,15 @@ class Viewer(QMainWindow):
                 "Use Save As to write a JPEG / TIFF / PNG instead.")
             overwrite = False
         if not overwrite:
+            filt = ("JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff);;PNG (*.png);;"
+                    "WebP (*.webp);;QOI lossless (*.qoi)"
+                    if ".qoi" in core.SAVE_EXTS else
+                    "JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff);;PNG (*.png);;"
+                    "WebP (*.webp)")
             dst, _ = QFileDialog.getSaveFileName(
                 self, "Save Photo As",
                 str(Path(src).with_name(Path(src).stem + "_edited.jpg")),
-                "JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff);;PNG (*.png);;WebP (*.webp)")
+                filt)
             if not dst:
                 return
         ext = Path(dst).suffix.lower()
@@ -1430,20 +1453,151 @@ class Viewer(QMainWindow):
         else:
             self.view.fit()
 
-    def _view_double(self):
-        """Double-click: Picasa toggles zoom, but in fullscreen it drops out of it
-        first — the second double-click then does the usual 100% / fit toggle."""
-        if self.isFullScreen():
-            self._leave_fullscreen()
-            self.view.actual_size()
-        elif self.view.is_fit or abs(self.view.scale - self.view.fit_scale()) < 1e-6:
-            self.view.actual_size()
-        else:
-            self.view.fit()
-
     def _view_click(self):
-        """Picasa behaviour: a click toggles between fit and 100%."""
+        """Picasa behaviour: a click toggles between fit and 100%.
+        While the color picker is armed the same click samples the pixel
+        under the cursor instead: hex goes to the clipboard + status bar."""
+        if getattr(self, "_pick_armed", False):
+            self._pick_color()
+            return
         self.view.actual_size() if self.view.is_fit else self.view.fit()
+
+    def _toggle_color_picker(self):
+        self._pick_armed = not getattr(self, "_pick_armed", False)
+        self.view.setCursor(Qt.CrossCursor if self._pick_armed
+                            else Qt.OpenHandCursor)
+        self.status.showMessage(
+            "Color picker: click the photo to copy #hex" if self._pick_armed
+            else "Color picker off", 3000)
+
+    def _pick_color(self):
+        self._pick_armed = False
+        self.view.setCursor(Qt.OpenHandCursor)
+        pm = self.view._pm
+        r = self.view.target_rect()
+        if pm is None or pm.isNull() or r.isEmpty():
+            return
+        p = self.view.mapFromGlobal(QCursor.pos())
+        x = int((p.x() - r.x()) / max(self.view.scale, 1e-9))
+        y = int((p.y() - r.y()) / max(self.view.scale, 1e-9))
+        x, y = max(0, min(x, pm.width() - 1)), max(0, min(y, pm.height() - 1))
+        hexv = pm.toImage().pixelColor(x, y).name()
+        QApplication.clipboard().setText(hexv)
+        self.status.showMessage(f"{hexv} copied  ({x},{y})", 4000)
+
+    def _hdr_dialog(self):
+        """HDR Tone Map: re-map the float EXR without re-reading the file."""
+        if not self.meta.get("is_hdr"):
+            self.status.showMessage("HDR Tone Map needs an .exr photo", 3000)
+            return
+        if not core.HDR_OK:
+            self.status.showMessage("OpenEXR is not installed", 3000)
+            return
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel,
+                                       QSlider, QVBoxLayout)
+        d = QDialog(self)
+        d.setWindowTitle("HDR Tone Map")
+        lay = QVBoxLayout(d)
+        ex = QSlider(Qt.Horizontal, d)
+        ex.setRange(-50, 50)
+        ex.setValue(int(round(self.meta.get("hdr_exposure", 0.0) * 10)))
+        key = QSlider(Qt.Horizontal, d)
+        key.setRange(5, 50)
+        key.setValue(int(round(self.meta.get("hdr_key", 0.18) * 100)))
+        lay.addWidget(QLabel("Exposure"))
+        lay.addWidget(ex)
+        lay.addWidget(QLabel("Key"))
+        lay.addWidget(key)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, d)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        if d.exec():
+            import numpy as np
+            p = self.current()
+            # re-decode the float data fresh (cheap vs a second master cache)
+            f = core.OpenEXR.InputFile(p)
+            try:
+                import Imath
+                hdr = f.header()
+                dw = hdr["dataWindow"]
+                W, H = dw.max.x - dw.min.x + 1, dw.max.y - dw.min.y + 1
+                pt = Imath.PixelType(Imath.PixelType.FLOAT)
+                chans = set(hdr["channels"].keys())
+                if chans >= {"R", "G", "B"}:
+                    a = np.stack([np.frombuffer(f.channel(c, pt),
+                                                dtype=np.float32).reshape(H, W)
+                                  for c in "RGB"], axis=-1)
+                else:
+                    y = np.frombuffer(f.channel(sorted(chans)[0], pt),
+                                      dtype=np.float32).reshape(H, W)
+                    a = np.stack([y, y, y], axis=-1)
+            finally:
+                f.close()
+            a = np.nan_to_num(a, nan=0.0, posinf=1e6, neginf=0.0)
+            ev, ky = ex.value() / 10.0, key.value() / 100.0
+            self.meta["hdr_exposure"], self.meta["hdr_key"] = ev, ky
+            self.base = core._tonemap_hdr(a, ev, ky)
+            self.rebuild(draft=False)
+            self.status.showMessage(f"HDR mapped  EV {ev:+.1f}  key {ky:.2f}", 3000)
+
+    def _frame_step(self, delta: int):
+        """Frame Navigation: step GIF/WEBP/APNG/TIFF/ICO frames on this photo."""
+        n = self.meta.get("n_frames", 1)
+        if n < 2 or self.base is None:
+            return
+        i = (getattr(self, "_frame_i", 0) + delta) % n
+        fr = core.frame_at(self.current(), i)
+        if fr is None:
+            return
+        self._frame_i = i
+        self.base = fr
+        self.rebuild(draft=False)
+        self.status.showMessage(f"Frame {i + 1}/{n}", 2000)
+
+    def _frames_export(self):
+        """Save every frame of this photo as files next to it."""
+        n = self.meta.get("n_frames", 1)
+        if n < 2:
+            self.status.showMessage("Single frame — nothing to export", 2500)
+            return
+        src = Path(self.current())
+        ok = 0
+        for i in range(n):
+            fr = core.frame_at(str(src), i)
+            if fr is None:
+                continue
+            dst = src.with_name(f"{src.stem}_f{i:03d}.png")
+            try:
+                fr.save(dst, "PNG", optimize=True)
+                ok += 1
+            except Exception:
+                pass
+        self.status.showMessage(f"Exported {ok}/{n} frames", 4000)
+
+    def _resize_dialog(self):
+        """Resize the CURRENT photo: long edge in px, applied on next Save."""
+        if self.base is None:
+            self.status.showMessage("Nothing to resize", 2500)
+            return
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QSpinBox, QVBoxLayout
+        cur = max(self.base.size)
+        d = QDialog(self)
+        d.setWindowTitle("Resize — long edge")
+        lay = QVBoxLayout(d)
+        lab = QLabel(f"Now: {self.base.width}×{self.base.height}  (applies on Save)")
+        lay.addWidget(lab)
+        sp = QSpinBox(d)
+        sp.setRange(16, max(cur, 12000))
+        sp.setValue(getattr(self, "_export_side", cur))
+        lay.addWidget(sp)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, d)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        if d.exec():
+            self._export_side = int(sp.value())
+            self.status.showMessage(f"Resize → {self._export_side}px on Save", 3000)
 
     def _zoom_need(self) -> int:
         """Long-edge pixels the current zoom demands; 0 when fit is enough.
@@ -1489,6 +1643,10 @@ class Viewer(QMainWindow):
             meta = ""
         if self.meta.get("is_raw"):
             meta = "RAW   ·   " + meta
+        if self.meta.get("is_hdr"):
+            meta = "HDR   ·   " + meta
+        if self.meta.get("n_frames", 1) > 1:
+            meta = f"{self.meta['n_frames']} frames   ·   " + meta
         self.nav.set_photo(p, self.index, len(self.folder), meta, self.view.label(),
                            not self.dev.is_default)
         w, h = self._last_size
