@@ -265,6 +265,7 @@ class Viewer(QMainWindow):
         self.nav.editToggled.connect(self.toggle_edit)
         self.nav.openClicked.connect(self.pick)
         self.view.zoomChanged.connect(self._sync_nav)
+        self.view.zoomChanged.connect(self._zoom_sharpen)
         self.view.wheelStepped.connect(self._wheel_step)
 
         # the window is frameless, so the title bar carries the window controls
@@ -358,6 +359,10 @@ class Viewer(QMainWindow):
         self._wheel_timer = QTimer(self)
         self._wheel_timer.setSingleShot(True)
         self._wheel_timer.timeout.connect(self._wheel_release)
+        # zoom sharpen: re-render at zoom depth, debounced
+        self._zoom_timer = QTimer(self)
+        self._zoom_timer.setSingleShot(True)
+        self._zoom_timer.timeout.connect(lambda: self.rebuild(draft=False))
         self._settle_sig = _SettleSignals()
         self._settle_sig.done.connect(self._on_settle_done)
         self._prefetch = _Prefetch()
@@ -987,11 +992,17 @@ class Viewer(QMainWindow):
 
         draft=True draws a downscaled preview while a slider is moving; a
         full-quality pass is scheduled a moment after the user lets go.
+
+        Zoom-aware: when zoomed past fit, the render target grows with the
+        zoom so pixels stay real (capped at the master size). Fit view keeps
+        the old capped preview -- zooming a 2800px render to 400% was the
+        pixelation complaint.
         """
         if self.base is None:
             return
         draft_side, full_side = core.estimate_preview_side(
             max(self.view.width(), self.view.height()))
+        full_side = max(full_side, self._zoom_need())
         out = render(self._scaled(draft_side if draft else full_side), self.dev)
         self._last_pixmap = pil_to_pixmap(out)
         self._last_size = out.size
@@ -1354,6 +1365,37 @@ class Viewer(QMainWindow):
     def _view_click(self):
         """Picasa behaviour: a click toggles between fit and 100%."""
         self.view.actual_size() if self.view.is_fit else self.view.fit()
+
+    def _zoom_need(self) -> int:
+        """Long-edge pixels the current zoom demands; 0 when fit is enough.
+
+        Fit view renders for the window already, so zooming (which fit()
+        reverses) never needs a re-render. Off fit, the demand grows with the
+        scale and is capped at the master -- there is nothing more to show.
+        """
+        if self.base is None or self.view.is_fit:
+            return 0
+        need = int(max(self.view.width(), self.view.height())
+                   * max(1.0, self.view.scale / max(self.view.fit_scale(), 1e-6)))
+        return min(max(self.base.size), need)
+
+    def _zoom_sharpen(self):
+        """Re-render at zoom depth so zoomed pixels stay real.
+
+        The fit preview is capped (~2800px); zooming it to 400% stretches the
+        same pixels (the pixelation complaint). Skipped when the displayed
+        pixmap already carries the needed resolution -- a rebuild of an
+        already-sharp photo is pure UI-thread freeze. Debounced 150ms so a
+        wheel burst re-renders once, not per notch.
+        """
+        if self.base is None or getattr(self, "_loading", False):
+            return
+        pm = self._last_pixmap
+        if pm is None or pm.isNull():
+            return
+        if max(pm.width(), pm.height()) >= self._zoom_need():
+            return
+        self._zoom_timer.start(150)
 
     def _sync_nav(self):
         p = self.current()
