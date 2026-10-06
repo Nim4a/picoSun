@@ -86,9 +86,12 @@ def video_thumbnail(path: str, at: float = 1.0, timeout: int = 25) -> QPixmap | 
 
 
 def image_thumbnail(path: str, box: int = 260) -> QPixmap | None:
-    im, _ = core.decode(path)
+    im, _ = core.master_for(path)
     if im is None:
         return None
+    # master_for hands back a CACHED image; thumbnail() shrinks in place, so
+    # operating on it directly would shred the cache entry for every later use
+    im = im.copy()
     im.thumbnail((box, box))
     return pil_to_pixmap(im)
 

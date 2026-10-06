@@ -596,6 +596,9 @@ class Filmstrip(QFrame):
             try:
                 im, _ = decode_fn(p)
                 if im is not None:
+                    # decode_fn may hand back a cached master: thumbnail()
+                    # mutates in place, so copy first or the cache is ruined
+                    im = im.copy()
                     im.thumbnail((64, 54), Image_LANCZOS)
                     pm = pil_to_pixmap(im)
             except Exception:

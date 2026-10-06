@@ -154,6 +154,40 @@ def is_raw(path: str) -> bool:
     return Path(path).suffix.lower() in RAW_EXTS
 
 
+# A viewer pages back and forth over the same files. The decode was the whole
+# per-page stall (~500ms for 12MP), and the strip decoded every tile AGAIN
+# from disk: one folder open decoded N photos twice. Cache the master by
+# (mtime, size, path) so a revisit costs nothing. Bounded (LRU, 12 masters)
+# and on RAW_CACHE_MISS nothing changes -- the first decode still pays full.
+_MASTER_CACHE_MAX = 12
+_master_cache: dict[tuple, tuple] = {}
+_master_order: list = []
+
+
+def _master_key(path: str):
+    try:
+        st = os.stat(path)
+        return (os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def master_for(path: str):
+    """Decoded master, cached. Returns None on failure (same as decode)."""
+    key = _master_key(path)
+    if key is not None and key in _master_cache:
+        _master_order.remove(key)
+        _master_order.append(key)
+        return _master_cache[key]
+    im, meta = decode(path)
+    if im is not None and key is not None:
+        _master_cache[key] = (im, meta)
+        _master_order.append(key)
+        while len(_master_order) > _MASTER_CACHE_MAX:
+            _master_cache.pop(_master_order.pop(0), None)
+    return (im, meta) if im is not None else (None, meta)
+
+
 def decode(path: str) -> tuple[Image.Image | None, dict]:
     """Return (PIL RGB image, metadata dict).  image is None on failure."""
     path = os.path.abspath(path)

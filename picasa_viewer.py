@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 import pv_core as core
-from pv_core import Develop, decode, render
+from pv_core import Develop, decode, master_for, render
 from pv_panel import CropOverlay, DevelopPanel
 from pv_preview import MEDIA_EXTS, VIDEO_EXTS, PreviewBar
 
@@ -91,7 +91,7 @@ class _DecodeJob(QRunnable):
 
     def run(self):
         try:
-            im, meta = decode(self.path)
+            im, meta = master_for(self.path)
             self.sig.done.emit(self.path, im, meta)
         except RuntimeError:
             pass                  # the viewer went away -- normal shutdown
@@ -157,7 +157,7 @@ class _PrefetchJob(QRunnable):
 
     def run(self):
         try:
-            im, meta = decode(self.path)
+            im, meta = master_for(self.path)
             if im is None:
                 return
             # render + convert off the UI thread: the profile showed that
@@ -636,7 +636,7 @@ class Viewer(QMainWindow):
         # made the strip feel like it was spinning.
         self._loading = True
         try:
-            im, meta = decode(path)
+            im, meta = master_for(path)
         finally:
             self._loading = False
         if im is None:
