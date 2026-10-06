@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime
+from functools import cmp_to_key
 from pathlib import Path
 from threading import Lock
 
@@ -67,8 +68,50 @@ from pv_view import PhotoView
 
 
 def _natural(name: str):
-    """Sort 'img2.jpg' before 'img10.jpg'."""
+    """Sort 'img2.jpg' before 'img10.jpg' (fallback when Explorer compare is missing)."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+_EXPLORER_CMP = None
+_EXPLORER_CMP_TRIED = False
+
+
+def _explorer_cmp_fn():
+    """StrCmpLogicalW -- the real Explorer order -- or None. Cached."""
+    global _EXPLORER_CMP, _EXPLORER_CMP_TRIED
+    if not _EXPLORER_CMP_TRIED:
+        _EXPLORER_CMP_TRIED = True
+        try:
+            from ctypes import c_int, c_wchar_p, windll
+            f = windll.shlwapi.StrCmpLogicalW
+            f.argtypes = [c_wchar_p, c_wchar_p]
+            f.restype = c_int
+            _EXPLORER_CMP = f
+        except Exception:
+            _EXPLORER_CMP = None
+    return _EXPLORER_CMP
+
+
+def _sort_media(paths: list) -> None:
+    """Sort a folder listing in place: photos first, then Explorer order.
+
+    One place -- _scan and first_media_in both route through here, so the
+    strip, the wheel and folder-open can never disagree about the order.
+    """
+    cmp = _explorer_cmp_fn()
+    if cmp is None:
+        paths.sort(key=lambda pp: (Path(pp).suffix.lower() in VIDEO_EXTS,
+                                   _natural(Path(pp).stem)))
+        return
+
+    def _c(a, b):
+        va = Path(a).suffix.lower() in VIDEO_EXTS
+        vb = Path(b).suffix.lower() in VIDEO_EXTS
+        if va != vb:
+            return 1 if va else -1
+        return cmp(Path(a).name, Path(b).name)
+
+    paths.sort(key=cmp_to_key(_c))
 
 
 # Wheel paging. Opening a photo decodes and renders it on the UI thread (a few
@@ -816,8 +859,7 @@ class Viewer(QMainWindow):
             except OSError:
                 pass
             # photos first, then videos -- how Picasa grouped a folder
-            files.sort(key=lambda pp: (Path(pp).suffix.lower() in VIDEO_EXTS,
-                                       _natural(Path(pp).stem)))
+            _sort_media(files)
             self._scan_cache = (folder, files)
         for i, p in enumerate(files):
             if os.path.normcase(p) == key:
@@ -1611,9 +1653,9 @@ def first_media_in(folder: str) -> str | None:
         return None
     if not names:
         return None
-    names.sort(key=lambda n: (Path(n).suffix.lower() in VIDEO_EXTS,
-                              _natural(Path(n).stem)))
-    return os.path.join(folder, names[0])
+    full = [os.path.join(folder, n) for n in names]
+    _sort_media(full)
+    return full[0]
 
 
 def resolve_target(arg: str | None) -> str | None:
