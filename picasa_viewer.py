@@ -268,10 +268,14 @@ class Viewer(QMainWindow):
         self.view.wheelStepped.connect(self._wheel_step)
 
         # the window is frameless, so the title bar carries the window controls
+        # Windowed ✕ (the title bar's own close button) is the ONLY thing that
+        # quits: it is hidden in fullscreen, so there is no way to quit by
+        # accident while viewing. Fullscreen has no quit button at all --
+        # only the ⤢ button that leaves fullscreen.
         self.chrome.minClicked.connect(self.showMinimized)
         self.chrome.maxClicked.connect(self._toggle_maximized)
         self.chrome.closeClicked.connect(self.close)
-        self.chrome.exitClicked.connect(self._chrome_exit)
+        self.chrome.exitClicked.connect(self._leave_fullscreen_if_full)
         self.nav.minClicked.connect(self.showMinimized)
         self.nav.maxClicked.connect(self._toggle_maximized)
         self.nav.closeClicked.connect(self.close)
@@ -333,10 +337,11 @@ class Viewer(QMainWindow):
         self.side.setStyleSheet("background:transparent;")
         self.setCentralWidget(holder)
 
-        # fullscreen: the title bar is hidden, so a floating ✕ rides the
-        # top-right corner -- the only chrome left in fullscreen
-        self._fs_exit = QPushButton("✕", self)
-        self._fs_exit.setToolTip("Exit fullscreen")
+        # fullscreen: the title bar is hidden, so a floating button rides the
+        # top-right corner -- the only chrome left in fullscreen. It LEAVES
+        # fullscreen (never quits); quitting is Alt+F4 / the windowed ✕.
+        self._fs_exit = QPushButton("⤢", self)
+        self._fs_exit.setToolTip("Leave fullscreen  (F)")
         self._fs_exit.setFixedSize(40, 30)
         self._fs_exit.setFocusPolicy(Qt.NoFocus)
         self._fs_exit.setCursor(Qt.ArrowCursor)
@@ -344,7 +349,7 @@ class Viewer(QMainWindow):
             "QPushButton{background:rgba(16,20,30,120);border:1px solid rgba(255,255,255,60);"
             "border-radius:15px;color:#e8e8ec;font-size:14px;}"
             "QPushButton:hover{background:rgba(196,43,28,200);color:#ffffff;}")
-        self._fs_exit.clicked.connect(self._chrome_exit)
+        self._fs_exit.clicked.connect(self._leave_fullscreen_if_full)
         self._fs_exit.hide()
 
         self.slide_timer = QTimer(self)
@@ -458,6 +463,17 @@ class Viewer(QMainWindow):
                     self.resize(*target)
         except Exception:
             pass
+
+    def _leave_fullscreen_if_full(self):
+        """The fullscreen ⤢ button: leaves fullscreen, NEVER quits.
+
+        The old shared _chrome_exit quit the whole app when the window was
+        not fullscreen -- one wrong click and the viewer was gone. Now the
+        fullscreen button only ever leaves fullscreen; quitting is the
+        windowed title-bar ✕ (hidden in fullscreen) or Alt+F4.
+        """
+        if self.isFullScreen():
+            self._leave_fullscreen()
 
     def _chrome_exit(self):
         """The top-right X. In fullscreen it leaves fullscreen (the app keeps
