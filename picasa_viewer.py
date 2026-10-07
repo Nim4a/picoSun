@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 import pv_core as core
 from pv_core import Develop, decode, master_for, render
 from pv_panel import CropOverlay, DevelopPanel
-from pv_preview import MEDIA_EXTS, VIDEO_EXTS, PreviewBar
+from pv_preview import MEDIA_EXTS, PreviewBar
 
 def _icon_path() -> str:
     """Locate picoSun.ico in the bundle (_MEIPASS) or next to the sources."""
@@ -93,25 +93,17 @@ def _explorer_cmp_fn():
 
 
 def _sort_media(paths: list) -> None:
-    """Sort a folder listing in place: photos first, then Explorer order.
+    """Sort a folder listing in place in Explorer order.
 
     One place -- _scan and first_media_in both route through here, so the
     strip, the wheel and folder-open can never disagree about the order.
     """
     cmp = _explorer_cmp_fn()
     if cmp is None:
-        paths.sort(key=lambda pp: (Path(pp).suffix.lower() in VIDEO_EXTS,
-                                   _natural(Path(pp).stem)))
+        paths.sort(key=lambda pp: _natural(Path(pp).stem))
         return
 
-    def _c(a, b):
-        va = Path(a).suffix.lower() in VIDEO_EXTS
-        vb = Path(b).suffix.lower() in VIDEO_EXTS
-        if va != vb:
-            return 1 if va else -1
-        return cmp(Path(a).name, Path(b).name)
-
-    paths.sort(key=cmp_to_key(_c))
+    paths.sort(key=cmp_to_key(lambda a, b: cmp(Path(a).name, Path(b).name)))
 
 
 # Wheel paging. Opening a photo decodes and renders it on the UI thread (a few
@@ -160,9 +152,7 @@ class _PrefetchThumb(QRunnable):
     def run(self):
         try:
             from pv_preview import _Job
-            sig = self.preview._sig
-            is_video = self.path in getattr(self.preview, "videos", set())
-            _Job(sig, self.path, is_video).run()
+            _Job(self.preview._sig, self.path).run()
         except RuntimeError:
             pass                  # the strip went away -- normal shutdown
         except Exception:
@@ -251,7 +241,6 @@ class Viewer(QMainWindow):
         self._cropping = False
         self._draft_pending = False
         self._preview_loaded_folder: str | None = None
-        self._player = None
 
         # ---------------- widgets
         self.chrome = Chrome(self)
@@ -285,7 +274,6 @@ class Viewer(QMainWindow):
 
         self.preview = PreviewBar(self)
         self.preview.picked.connect(self.open)
-        self.preview.videoPicked.connect(self.open_video)
         self.preview.hovered.connect(self._on_preview_hover)
         # the wheel over the bottom bar steps through the folder
         self.preview.stepped.connect(self._wheel_step)
@@ -697,10 +685,6 @@ class Viewer(QMainWindow):
         if not os.path.isfile(path):
             return False
         self._wheel_timer.stop()          # an explicit open settles the wheel
-        if Path(path).suffix.lower() in VIDEO_EXTS:
-            self.open_video(path)
-            return True
-        self.close_player()
         self.settings.setValue("last_dir", os.path.dirname(path))
         # an explicit open is the point to re-read the folder (the wheel's
         # _select reuses the cached listing while paging inside one folder)
@@ -790,62 +774,11 @@ class Viewer(QMainWindow):
         QTimer.singleShot(0, self._sync_bars)
         QTimer.singleShot(0, self._prefetch_around)
 
-    def open_video(self, path: str):
-        """Play a video from the strip in the photo area, Picasa-3 style."""
-        path = os.path.abspath(path)
-        if not os.path.isfile(path):
-            return
-        self.close_player()
-        try:
-            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-            from PySide6.QtMultimediaWidgets import QVideoWidget
-        except Exception:
-            QMessageBox.information(self, APP_NAME,
-                                    "Video playback needs PySide6 multimedia, which is "
-                                    "not available in this build.")
-            os.startfile(path)  # noqa: S606
-            return
-        video = QVideoWidget(self)
-        video.setAspectRatioMode(Qt.KeepAspectRatio)
-        video.setStyleSheet("background:black;")
-        video.setGeometry(self.view.rect())
-        video.show()
-        video.raise_()
-        player = QMediaPlayer(self)
-        audio = QAudioOutput(self)
-        player.setAudioOutput(audio)
-        player.setVideoOutput(video)
-        player.setSource(QUrl.fromLocalFile(path))
-        player.setPosition(0)
-        player.play()
-        self._player = (player, video)
-        self._scan(path)
-        self._update_title()
-        self.preview.reveal(path)
-        self.nav.set_photo(path, self.index, len(self.folder), "video   ·   playing", "",
-                           False)
-        self.status.showMessage(f"Playing {Path(path).name} — "
-                                f"double-click the photo area to close", 6000)
-        self.video_area = video
-        self.view.installEventFilter(self)
-
     def _update_title(self):
         p = self.current()
         name = Path(p).name if p else APP_NAME
         counter = f"{self.index + 1}/{len(self.folder)}  —  " if len(self.folder) > 1 else ""
         self.setWindowTitle(f"{counter}{name} — {APP_NAME}")
-
-    def close_player(self):
-        if self._player:
-            try:
-                self._player[0].stop()
-                self._player[1].close()
-                self._player[1].deleteLater()
-            except Exception:
-                pass
-            self._player = None
-        # the event filter stays installed: it also carries the view-resize
-        # re-sync the floating bars depend on
 
     def eventFilter(self, obj, ev):
         # the photo area's rect is what the floating bars are placed against;
@@ -854,14 +787,6 @@ class Viewer(QMainWindow):
         if obj is self.view and ev.type() == QEvent.Resize:
             self._sync_bars()
             return False
-        # double-click anywhere on the photo area closes the video
-        if obj is self.view and ev.type() in (QEvent.MouseButtonDblClick,
-                                              QEvent.KeyPress):
-            if self._player:
-                key = ev.key() if ev.type() == QEvent.KeyPress else None
-                if key in (None, Qt.Key_Escape, Qt.Key_Space, Qt.Key_Return):
-                    self.close_player()
-                    return True
         return super().eventFilter(obj, ev)
 
     def _scan(self, path: str):
@@ -882,7 +807,6 @@ class Viewer(QMainWindow):
                         files.append(os.path.join(folder, n))
             except OSError:
                 pass
-            # photos first, then videos -- how Picasa grouped a folder
             _sort_media(files)
             self._scan_cache = (folder, files)
         for i, p in enumerate(files):
@@ -892,7 +816,7 @@ class Viewer(QMainWindow):
         self.folder, self.index = [path], 0
 
     def _step_target(self, delta: int) -> str | None:
-        """Where a step lands: videos are skipped, same rule as `step`.
+        """Where a step lands. Shared with the scrolling path
 
         Shared with the scrolling path so the cheap selection and the real page
         turn can never disagree about which photo comes next.
@@ -900,18 +824,15 @@ class Viewer(QMainWindow):
         n = len(self.folder)
         if n < 2:
             return None
-        # walk toward the edge; videos are skipped over. The edge is a hard
-        # stop -- no wrapping, no infinite scroll. (The slideshow wraps for
-        # itself in _slide_tick.)
+        # walk toward the edge. The edge is a hard stop -- no wrapping, no
+        # infinite scroll. (The slideshow wraps for itself in _slide_tick.)
         idx = self.index + delta
         while 0 <= idx < n:
-            if self.folder[idx] not in self._video_set():
-                return self.folder[idx]
-            idx += delta
+            return self.folder[idx]
         return None
 
     def step(self, delta: int):
-        """Walk photos; videos in the folder are skipped over when paging."""
+        """Walk photos."""
         if not self.folder:
             return
         if len(self.folder) == 1:
@@ -922,9 +843,6 @@ class Viewer(QMainWindow):
         idx = self.index + delta
         while 0 <= idx < n:
             p = self.folder[idx]
-            if p in self._video_set():
-                idx += delta
-                continue
             if self.open(p, quiet=True):
                 return
             # this file cannot be decoded: skip it and keep walking, so one
@@ -1039,13 +957,6 @@ class Viewer(QMainWindow):
                 QThreadPool.globalInstance().start(
                     _PrefetchThumb(self.preview, nxt))
                 break
-
-    def _video_set(self) -> set:
-        s = getattr(self, "_vids", None)
-        if s is None or len(s) != len(self.folder):
-            s = {pp for pp in self.folder if Path(pp).suffix.lower() in VIDEO_EXTS}
-            self._vids = s
-        return s
 
     def jump(self, i: int):
         if self.folder:
@@ -1352,7 +1263,7 @@ class Viewer(QMainWindow):
         self.view.update()
         if on:
             self.status.showMessage("Scroll the strip with the wheel · "
-                                    "click a photo to open · click a video to play", 4000)
+                                    "click a photo to open", 4000)
 
     def toggle_info(self):
         show = not self.info.isVisible()
@@ -1758,7 +1669,6 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         p.fillRect(self.width() - 2, 0, 2, self.height(), c)
 
     def closeEvent(self, ev):
-        self.close_player()
         try:
             self.preview.shutdown()
         except Exception:

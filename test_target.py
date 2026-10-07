@@ -67,8 +67,8 @@ check("a media file resolves to itself",
       pv.resolve_target(str(jpg)) == str(jpg), pv.resolve_target(str(jpg)))
 check("a HEIC file resolves to itself",
       pv.resolve_target(str(folder / "shot.heic")) == str(folder / "shot.heic"))
-check("a video file resolves to itself",
-      pv.resolve_target(str(folder / "clip.mp4")) == str(folder / "clip.mp4"))
+check("a video file is NOT media any more (video removed)",
+      pv.resolve_target(str(folder / "clip.mp4")) is None)
 check("a text file resolves to None",
       pv.resolve_target(str(folder / "notes.txt")) is None)
 check("no argument resolves to None", pv.resolve_target(None) is None)
@@ -84,17 +84,15 @@ vids = work / "vids"
 vids.mkdir()
 for name in ("a.mp4", "b.mkv"):
     (vids / name).write_bytes(b"x")
-only_video = pv.resolve_target(str(vids))
-check("a video-only folder still opens something",
-      only_video is not None and only_video.endswith("a.mp4"), only_video)
+check("a video-only folder resolves to None (video removed)",
+      pv.resolve_target(str(vids)) is None)
 
 mixed = work / "mixed"
 mixed.mkdir()
-for name in ("z_last.jpg", "a_first.mp4"):
+for name in ("z_last.jpg", "a_first.txt"):
     (mixed / name).write_bytes(b"x")
-check("photos outrank videos even when the video sorts first",
-      os.path.basename(pv.resolve_target(str(mixed))) == "z_last.jpg",
-      os.path.basename(pv.resolve_target(str(mixed)) or ""))
+check("photos outrank non-media files even when they sort first",
+      os.path.basename(pv.resolve_target(str(mixed)) or "") == "z_last.jpg")
 
 print()
 print("--- the app really opens the folder --------------------------------")
@@ -119,8 +117,9 @@ check("the whole folder is loaded, not just the one file",
       len(w.folder) == 3, f"{len(w.folder)} items: {[Path(p).name for p in w.folder]}")
 check("the current photo is the one asked for",
       os.path.normcase(w.current()) == os.path.normcase(target), w.current())
-check("it starts on a photo, not a video",
-      Path(w.current()).suffix.lower() not in pv.VIDEO_EXTS, w.current())
+check("it starts on a photo (video support removed)",
+      Path(w.current()).suffix.lower() in __import__("pv_preview").core.IMAGE_EXTS,
+      w.current())
 
 w.close()
 shutil.rmtree(work, ignore_errors=True)

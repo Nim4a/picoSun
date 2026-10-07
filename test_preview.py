@@ -1,4 +1,4 @@
-"""Bottom preview strip: real photos + real videos, hover-to-scroll."""
+"""Bottom preview strip: real photos, hover-to-scroll."""
 from __future__ import annotations
 
 import os
@@ -16,16 +16,9 @@ from PySide6.QtWidgets import QApplication, QListWidgetItem
 
 import picasa_viewer
 import pv_preview
-from pv_preview import (MEDIA_EXTS, VIDEO_EXTS, PreviewBar,
-                        _StripList, placeholder)
+from pv_preview import MEDIA_EXTS, PreviewBar, _StripList, placeholder
 
 fails = []
-subprocess = pv_preview.subprocess
-
-
-def pv_ffmpeg():
-    return pv_preview.FFMPEG
-
 
 def check(name, cond, extra=""):
     print(("PASS  " if cond else "FAIL  ") + name + (f"   {extra}" if extra else ""))
@@ -47,16 +40,7 @@ REF = HERE / "refpics"
 shutil.copy(REF / "portrait_01.jpg", MIX / "a_photo.jpg")
 shutil.copy(REF / "portrait_02.jpg", MIX / "b_photo.jpg")
 shutil.copy(HERE / "testpics" / "pic3.jpg", MIX / "c_photo.jpg")
-for name, src in (("d_clip.mp4", REF / "portrait_01.jpg"),
-                  ("e_clip.mp4", "testsrc2=size=640x360:rate=15:duration=2")):
-    cmd = ([pv_ffmpeg(), "-v", "quiet", "-y", "-loop", "1", "-i", str(src),
-            "-t", "3", "-r", "12", "-vf", "scale=640:-2", "-c:v", "libx264",
-            "-pix_fmt", "yuv420p", str(MIX / name)]
-           if isinstance(src, Path) else
-           [pv_ffmpeg(), "-v", "quiet", "-y", "-f", "lavfi", "-i", src,
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(MIX / name)])
-    subprocess.run(cmd, check=True, timeout=180)
-check("fixture folder ready", len(list(MIX.iterdir())) == 5,
+check("fixture folder ready", len(list(MIX.iterdir())) == 3,
       f"{len(list(MIX.iterdir()))} files")
 
 # A QPixmap cannot be built before a QGuiApplication exists — it kills the process
@@ -64,30 +48,11 @@ check("fixture folder ready", len(list(MIX.iterdir())) == 5,
 app = QApplication([])
 
 # ---------------------------------------------------------------- media table
-check("ffmpeg found", bool(pv_preview.FFMPEG), pv_preview.FFMPEG or "missing")
-check("ffprobe found", bool(pv_preview.FFPROBE), pv_preview.FFPROBE or "missing")
-check("video exts include mp4/mkv/mov",
-      {".mp4", ".mkv", ".mov"} <= VIDEO_EXTS)
-check("media = images + videos",
-      MEDIA_EXTS == (pv_preview.core.IMAGE_EXTS | VIDEO_EXTS))
+check("media = images only (video removed)",
+      MEDIA_EXTS == pv_preview.core.IMAGE_EXTS)
+check("VIDEO_EXTS is empty (video support removed)", len(pv_preview.VIDEO_EXTS) == 0)
 
 # ------------------------------------------------------- thumbnail extraction
-from PySide6.QtGui import QPixmap
-
-pm = pv_preview.video_thumbnail(str(MIX / "d_clip.mp4"))
-check("video frame extracted", pm is not None and not pm.isNull(),
-      f"{pm.width()}x{pm.height()}" if pm else "None")
-check("video frame is thumbnail-sized", pm is not None and pm.width() <= pv_preview.THUMB_W,
-      f"{pm.width() if pm else 0}px")
-
-dur, res = pv_preview.probe_duration(str(MIX / "e_clip.mp4"))
-check("duration probed", 1.0 < dur < 3.5, f"{dur:.2f}s")
-check("resolution probed", "640" in res, res)
-check("duration label", pv_preview.duration_label(95) == "1:35",
-      pv_preview.duration_label(95))
-check("duration label short", pv_preview.duration_label(9) == "0:09",
-      pv_preview.duration_label(9))
-
 ph = pv_preview.image_thumbnail(str(MIX / "a_photo.jpg"))
 check("photo thumbnail extracted", ph is not None and not ph.isNull())
 
@@ -115,14 +80,12 @@ check("strip sits at the bottom",
       w.preview.parentWidget() is not None and
       w.preview.mapTo(w, QPoint(0, 0)).y() > w.height() * 0.6,
       f"y={w.preview.mapTo(w, QPoint(0, 0)).y()} of {w.height()}")
-check("folder has photos and videos", len(w.folder) == 5, f"{len(w.folder)} items")
-check("photos sorted before videos",
-      [Path(p).suffix for p in w.folder] == [".jpg", ".jpg", ".jpg", ".mp4", ".mp4"],
+check("folder has only photos", len(w.folder) == 3, f"{len(w.folder)} items")
+check("all photos in scan",
+      all(Path(p).suffix == ".jpg" for p in w.folder),
       str([Path(p).suffix for p in w.folder]))
-check("strip got every item", w.preview.list.count() == 5,
+check("strip got every item", w.preview.list.count() == 3,
       f"{w.preview.list.count()} tiles")
-check("strip knows the videos",
-      len(w.preview.videos) == 2, f"{len(w.preview.videos)}")
 
 # --- thumbnails arrive asynchronously from the worker pool; the worker
 # stores into _PIXMAP_ROLE (the icon stays empty so the delegate's cover
@@ -133,9 +96,7 @@ while time.time() < deadline:
     thumbs = all(w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE) is not None
                  and not w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE).isNull()
                  for i in range(w.preview.list.count()))
-    metas = all(":" in w.preview.list.item(i).toolTip()
-                for i in range(3, 5))
-    if thumbs and metas:
+    if thumbs:
         break
     time.sleep(0.15)
 check("every tile got a thumbnail",
@@ -148,25 +109,13 @@ check("strip matches the folder scan",
       [w.preview.list.item(i).data(Qt.UserRole) for i in range(w.preview.list.count())]
       == w.folder)
 
-VID = [i for i, p in enumerate(w.folder) if Path(p).suffix.lower() == ".mp4"]
-check("two videos in the folder", len(VID) == 2, f"rows {VID}")
-
-# video tiles carry a duration badge in the tooltip
-vid_tip = w.preview.list.item(VID[0]).toolTip()
-check("video tooltip has duration", ":" in vid_tip and "mp4" in vid_tip, vid_tip)
-check("video tile flagged for the play badge",
-      w.preview.list.item(VID[0]).data(pv_preview._IS_VIDEO_ROLE) is True)
-check("photo tile has no play badge",
-      not w.preview.list.item(0).data(pv_preview._IS_VIDEO_ROLE))
-
 # ---------------------------------------------------------------- navigation
-photos = [Path(p).suffix.lower() for p in w.folder]
 w.step(1)
 check("arrow keys walk photos", w.current().endswith("b_photo.jpg"), w.current())
 w.step(1)
 check("…and keep walking", w.current().endswith("c_photo.jpg"), w.current())
 w.step(1)
-check("videos are skipped; the walk stops at the last photo, no wrap",
+check("the walk stops at the last photo, no wrap",
       w.current().endswith("c_photo.jpg"),
       f"{Path(w.current()).name} (index {w.index})")
 check("current item highlighted in strip",
@@ -180,10 +129,11 @@ check("current item highlighted in strip",
 strip = _StripList()
 strip.resize(120, 50)
 strip.setFixedWidth(120)
-for p in sorted(MIX.iterdir()):
+# 20 tiles guarantee overflow in 120px (20 * 31px > 120px)
+for i in range(20):
     it = QListWidgetItem()
-    it.setIcon(QIcon(placeholder(p)))
-    it.setData(Qt.UserRole, str(p))
+    it.setIcon(QIcon(placeholder(REF / "portrait_01.jpg")))
+    it.setData(Qt.UserRole, str(REF / "portrait_01.jpg"))
     strip.addItem(it)
 strip.show()
 for _ in range(6):
@@ -261,8 +211,6 @@ check("leaving the strip never emits an extra step of its own",
 # connect stepped again here -- the app already wires it to step(), and a
 # second connection would advance two files per notch.
 w.preview.list._hover = True
-# land on a photo whose NEXT file is also a photo, so the wheel can advance:
-# after the last photo the walk stops (no wrap), and videos are skipped over
 w.jump(1)                     # b_photo -> next in line is c_photo
 start_index = w.index
 wheel2 = QWheelEvent(QPointF(80, 30), QPointF(80, 30), QPoint(0, 0),
@@ -295,13 +243,6 @@ w._on_preview_hover(True)
 check("hover state recorded on the view", w.view.strip_hover is True)
 w._on_preview_hover(False)
 check("hover cleared", w.view.strip_hover is False)
-
-# clicking a video tile -> the app takes over and plays it
-played = []
-w.preview.videoPicked.connect(played.append)
-w.preview._clicked(w.preview.list.item(VID[0]))
-check("clicking a video tile emits videoPicked", len(played) == 1,
-      Path(played[0]).name if played else "")
 
 # clicking a photo tile opens that photo
 opened = []

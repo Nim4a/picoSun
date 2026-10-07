@@ -2,21 +2,17 @@
 
 Hovering the strip makes it scroll with the wheel (and it follows the currently
 shown item).  Video thumbnails are real frames grabbed with ffmpeg, extracted off
-the GUI thread so a folder full of videos never blocks the window.
+the GUI thread so a large folder never blocks the window.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap,
-                           QPolygon)
+from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QSizePolicy, QStyledItemDelegate,
                                QStyle, QWidget)
@@ -24,76 +20,53 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListWidg
 import pv_core as core
 from pv_ui_common import pil_to_pixmap
 
-VIDEO_EXTS = {
-    ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg",
-    ".mpeg", ".mts", ".m2ts", ".ts", "3gp", ".ogv", ".rmvb",
-}
-MEDIA_EXTS = core.IMAGE_EXTS | VIDEO_EXTS
+# Video support removed (photos only). MEDIA_EXTS covers just stills, so
+# only photos enter the folder scan, the strip, and the wheel.
+VIDEO_EXTS: set[str] = set()
+MEDIA_EXTS = core.IMAGE_EXTS
 
 # Picasa measurements: strip ~50px tall, tiles 30x49 on a 31px pitch with a
 # 1px black gutter, thin blue selection frame. Scrollbar hidden -- the strip
 # glides to the current tile instead.
 THUMB_W, THUMB_H = 30, 44          # icon box; delegate paints cover below
 
-FFMPEG = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
-FFPROBE = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
-
-CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-
 
 # --------------------------------------------------------------------- loaders
 
-def probe_duration(path: str) -> tuple[float, str]:
-    """(seconds, resolution) via ffprobe, or (0, '') when unavailable."""
-    if not FFPROBE:
-        return 0.0, ""
-    try:
-        out = subprocess.run(
-            [FFPROBE, "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", "-select_streams", "v:0", path],
-            capture_output=True, timeout=20,
-            creationflags=CREATE_NO_WINDOW).stdout
-        data = json.loads(out.decode("utf-8", "replace") or "{}")
-        dur = float(data.get("format", {}).get("duration", 0) or 0)
-        if not dur:
-            dur = float((data.get("streams") or [{}])[0].get("duration", 0) or 0)
-        st = (data.get("streams") or [{}])[0]
-        res = f"{st.get('width', '?')}×{st.get('height', '?')}" if st.get("width") else ""
-        return dur, res
-    except Exception:
-        return 0.0, ""
-
-
-def video_thumbnail(path: str, at: float = 1.0, timeout: int = 25) -> QPixmap | None:
-    """One real frame from the video, decoded by ffmpeg into a QPixmap."""
-    if not FFMPEG:
-        return None
-    try:
-        proc = subprocess.run(
-            [FFMPEG, "-v", "quiet", "-ss", f"{max(at, 0.0):.2f}", "-i", path,
-             "-frames:v", "1", "-vf", f"scale={THUMB_W * 2}:-2:flags=bilinear",
-             "-f", "image2pipe", "-vcodec", "png", "-"],
-            capture_output=True, timeout=timeout, creationflags=CREATE_NO_WINDOW)
-        if not proc.stdout:
-            return None
-        img = QImage()
-        if not img.loadFromData(proc.stdout, "PNG"):
-            return None
-        return QPixmap.fromImage(img).scaled(
-            THUMB_W, THUMB_H, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    except Exception:
-        return None
-
-
 def image_thumbnail(path: str, box: int = 260) -> QPixmap | None:
-    im, _ = core.master_for(path)
-    if im is None:
+    """Cheap thumbnail for the strip — never the full-res master.
+
+    master_for() decodes the WHOLE photo (60MP RAW, huge JPEG) and arms the
+    master-LRU with it; a big folder then decodes every photo at full
+    resolution, which is why a large folder floods. Thumbnails only need a
+    small box, so decode small directly (PIL draft rescues JPEG to ~1/8
+    scale, our RAW/EXR path needs the full file but runs on the worker).
+    """
+    ext = Path(path).suffix.lower()
+    try:
+        if ext in core.RAW_EXTS or ext == ".exr":
+            im, _ = core.master_for(path)
+            if im is None:
+                return None
+            im = im.copy()
+            im.thumbnail((box, box))
+            return pil_to_pixmap(im)
+        from PIL import Image, ImageOps
+        with Image.open(path) as im:
+            try:
+                im.draft("RGB", (box * 2, box * 2))   # JPEG partial decode
+            except Exception:
+                pass                                   # non-JPEG: full small read
+            im.load()
+            try:
+                im = ImageOps.exif_transpose(im)
+            except Exception:
+                pass
+            im = im.convert("RGB")
+            im.thumbnail((box, box))
+            return pil_to_pixmap(im)
+    except Exception:
         return None
-    # master_for hands back a CACHED image; thumbnail() shrinks in place, so
-    # operating on it directly would shred the cache entry for every later use
-    im = im.copy()
-    im.thumbnail((box, box))
-    return pil_to_pixmap(im)
 
 
 def placeholder(path: str) -> QPixmap:
@@ -115,37 +88,23 @@ def placeholder(path: str) -> QPixmap:
     return pm
 
 
-def duration_label(seconds: float) -> str:
-    if not seconds:
-        return ""
-    s = int(round(seconds))
-    return f"{s // 60}:{s % 60:02d}" if s >= 60 else f"0:{s:02d}"
-
-
 class _Signals(QObject):
     done = Signal(str, object)          # path, QPixmap
-    meta = Signal(str, tuple)           # path, (duration, resolution)
 
 
 class _Job(QRunnable):
     """Thumbnail extraction on a worker thread."""
 
-    def __init__(self, sig: _Signals, path: str, is_video: bool):
+    def __init__(self, sig: _Signals, path: str):
         super().__init__()
-        self.sig, self.path, self.is_video = sig, path, is_video
+        self.sig, self.path = sig, path
 
     def run(self):
         # the strip can be closed (or a new folder loaded) while this worker is
         # still decoding; the signal object then dies under us and emitting
         # raises RuntimeError.  That is a normal shutdown, not a failure.
         try:
-            if self.is_video:
-                pm = video_thumbnail(self.path)
-                if pm is None:
-                    pm = placeholder(self.path)
-                self.sig.meta.emit(self.path, probe_duration(self.path))
-            else:
-                pm = image_thumbnail(self.path) or placeholder(self.path)
+            pm = image_thumbnail(self.path) or placeholder(self.path)
             self.sig.done.emit(self.path, pm)
         except RuntimeError:
             pass                      # the strip went away — nothing to do
@@ -299,11 +258,10 @@ class _StripList(QListWidget):
 
 
 class PreviewBar(QWidget):
-    """The bottom strip. Photos and videos, live thumbnails; the wheel steps
+    """The bottom strip. Photos, live thumbnails; the wheel steps
     from one file to the next while the pointer rests on it."""
 
     picked = Signal(str)          # a photo was clicked -> open it
-    videoPicked = Signal(str)     # a video was clicked -> hand back to the app
     hovered = Signal(bool)
     stepped = Signal(int)         # wheel over the strip -> next/previous file
     statusText = Signal(str)
@@ -314,12 +272,10 @@ class PreviewBar(QWidget):
         self.setFixedHeight(50)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.paths: list[str] = []
-        self.videos: set[str] = set()
         self._pool = ThreadPoolExecutor(max_workers=max(2, (os.cpu_count() or 4) - 1),
                                         thread_name_prefix="pvthumb")
         self._sig = _Signals(self)
         self._sig.done.connect(self._on_thumb)
-        self._sig.meta.connect(self._on_meta)
         self._pending: dict[str, QListWidgetItem] = {}
         self._paths_to_load: list[str] = []
 
@@ -345,7 +301,6 @@ class PreviewBar(QWidget):
 
     def load(self, paths: list[str]):
         self.paths = list(paths)
-        self.videos = {p for p in paths if Path(p).suffix.lower() in VIDEO_EXTS}
         self.list.clear()
         self._pending.clear()
         empty = QPixmap()
@@ -365,7 +320,7 @@ class PreviewBar(QWidget):
         """Keep at most a few extractions queued; the rest wait for the pool."""
         while self._paths_to_load:
             path = self._paths_to_load.pop(0)
-            job = _Job(self._sig, path, path in self.videos)
+            job = _Job(self._sig, path)
             job.setAutoDelete(True)
             QThreadPool.globalInstance().start(job)
 
@@ -374,28 +329,10 @@ class PreviewBar(QWidget):
         if item is None:
             return
         self._store_thumb(item, pm)
-        if Path(path).suffix.lower() in VIDEO_EXTS:
-            self._mark_video(item)
-
-    def _mark_video(self, item: QListWidgetItem):
-        item.setData(_IS_VIDEO_ROLE, True)
-
-    def _on_meta(self, path: str, meta):
-        item = self._pending.get(path)
-        if item is None:
-            return
-        dur, res = meta
-        bits = [b for b in (Path(path).name, duration_label(dur), res) if b]
-        item.setToolTip("   ·   ".join(bits))
-        if dur:
-            item.setData(_DURATION_ROLE, duration_label(dur))
 
     def _clicked(self, item: QListWidgetItem):
         path = item.data(Qt.UserRole)
-        if path in self.videos:
-            self.videoPicked.emit(path)
-        else:
-            self.picked.emit(path)
+        self.picked.emit(path)
 
     # ------------------------------------------------------------------ display
     def thumb_for(self, path: str) -> QPixmap | None:
@@ -447,8 +384,6 @@ class PreviewBar(QWidget):
         self._pool.shutdown(wait=False, cancel_futures=True)
 
 
-_DURATION_ROLE = Qt.UserRole + 1
-_IS_VIDEO_ROLE = Qt.UserRole + 2
 _PIXMAP_ROLE = Qt.UserRole + 3
 
 
@@ -478,28 +413,6 @@ class TileDelegate(QStyledItemDelegate):
             painter.drawPixmap(dx, dy, dw, dh, pm)
         else:
             painter.fillRect(r, QColor(38, 38, 40))
-        if index.data(_IS_VIDEO_ROLE):
-            tri = QPolygon([
-                QPoint(r.center().x() - 6, r.center().y() - 9),
-                QPoint(r.center().x() + 9, r.center().y()),
-                QPoint(r.center().x() - 6, r.center().y() + 9)])
-            painter.setPen(QPen(QColor(0, 0, 0, 170), 2.5))
-            painter.setBrush(QColor(0, 0, 0, 130))
-            painter.drawPolygon(tri)
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(QColor(250, 250, 250), 1.2))
-            painter.drawPolygon(tri)
-        dur = index.data(_DURATION_ROLE)
-        if dur:
-            plate = r.adjusted(max(r.width() - 34, 0), max(r.height() - 17, 0), -5, -4)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 185))
-            painter.drawRoundedRect(plate, 2, 2)
-            f = QFont()
-            f.setPointSize(7)
-            painter.setFont(f)
-            painter.setPen(QColor(238, 238, 238))
-            painter.drawText(plate, Qt.AlignCenter, dur)
         if option.state & QStyle.State_Selected:
             painter.setPen(QPen(QColor(0x2f, 0x7f, 0xc4), 2))
             painter.setBrush(Qt.NoBrush)
