@@ -185,12 +185,9 @@ class Viewer(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        # NOTE: NO WA_TranslucentBackground here. On Win32 + Qt layered
-        # windows, per-pixel alpha is composited against BLACK, not the
-        # desktop: a 50%-alpha dark fill reads as dark gray, never as
-        # frosted glass, and alpha-0 regions show the window's own black
-        # instead of the wallpaper. The backdrop is painted opaque dark in
-        # paintEvent below; DWM blur (enable_acrylic) gives the frost.
+        # Normal (non-layered) window: DWM owns the frame, the backdrop is
+        # just dark paint. Layered translucency composited against black on
+        # Win32, which is what washed everything white.
         self.setMinimumSize(560, 380)
         self.settings = self.SETTINGS or QSettings(APP_NAME, APP_NAME)
 
