@@ -1493,6 +1493,11 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         self.crop_overlay.setGeometry(self.view.rect())
         self._sync_side()
         self._sync_bars()
+        # the floating button is positioned from the WINDOW size, which only
+        # resizeEvent knows for sure (sync_bars works in view coords)
+        if self._fs_exit.isVisible():
+            self._fs_exit.move(self.width() - 48, 8)
+            self._fs_exit.raise_()
 
     def _sync_bars(self):
         """The floating chrome: preview strip rides the bottom edge, the control
