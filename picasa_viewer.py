@@ -1739,44 +1739,16 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
             f"<br>HEIC: {'pillow-heif' if core.HEIF_OK else 'not available'}")
 
     # ------------------------------------------------------------- lifecycle
-    # 5% blur backdrop (a light frosted look; keep it subtle). The app is
-    # fullscreen over the desktop, so grab the screen behind the window and
-    # blur it mildly, once per resize/config change -- not per frame.
-    _backdrop: "QPixmap | None" = None
-    _backdrop_dirty = True
-
-    def _refresh_backdrop(self):
-        self._backdrop_dirty = False
-        try:
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtGui import QPixmap
-            scr = QApplication.primaryScreen()
-            pm = scr.grabWindow(0)          # whole desktop
-            g = self.frameGeometry()
-            pm = pm.copy(g)                 # the region under this window
-            # very light blur on a downscaled copy, then smooth upscale
-            pm = pm.scaled(max(1, pm.width() // 4), max(1, pm.height() // 4),
-                           Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            pm = pm.scaled(g.width(), g.height(), Qt.IgnoreAspectRatio,
-                           Qt.SmoothTransformation)
-            self._backdrop = pm
-        except Exception:
-            self._backdrop = None
-
     def paintEvent(self, ev):
-        """Background: 5% blur of the desktop behind (frosted glass).
+        """Clear glass: wallpaper shows straight through, clicks stay ours.
 
-        The blurred grab replaces the fully clear glass: still every pixel
-        hit-testable (the alpha-1 fill below keeps clicks ours), but the desktop
-        behind is a 5% frosted copy instead of sharp wallpaper.
+        Alpha 1 is invisible over any wallpaper but keeps every pixel
+        hit-testable: with alpha 0 the clicks fall through to whatever is
+        behind the app (the click-through complaint). Only the photo, bars
+        and tiles paint themselves; everything else is clear glass.
         """
         from PySide6.QtGui import QPainter, QColor
-        if self._backdrop is None:
-            self._refresh_backdrop()
         p = QPainter(self)
-        if self._backdrop is not None:
-            p.setRenderHint(QPainter.SmoothPixmapTransform)
-            p.drawPixmap(self.rect(), self._backdrop, self._backdrop.rect())
         p.fillRect(self.rect(), QColor(0, 0, 0, 1))
 
     def closeEvent(self, ev):
@@ -1811,7 +1783,6 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         super().resizeEvent(ev)
         self.crop_overlay.setGeometry(self.view.rect())
         self._sync_side()
-        self._backdrop_dirty = True
         self._sync_bars()
         # the floating button is positioned from the WINDOW size, which only
         # resizeEvent knows for sure (sync_bars works in view coords)
