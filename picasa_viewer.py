@@ -1417,11 +1417,10 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         vw = self.view.width()
         nav_h = self.nav.height() or self.nav.sizeHint().height()
         strip_h = self.preview.height() or self.preview.sizeHint().height()
-        # the strip sits just above the control bar
-        self.nav.setGeometry(12, self.view.height() - nav_h - 12,
+        self.nav.setGeometry(12, self.view.height() - nav_h - strip_h - 16,
                              vw - 24, nav_h)
-        self.preview.setGeometry(12, self.view.height() - nav_h - strip_h - 20,
-                                 vw - 24, strip_h)
+        self.preview.setGeometry(0, self.view.height() - strip_h,
+                                 vw, strip_h)
         self.nav.raise_()
         self.preview.raise_()
 
