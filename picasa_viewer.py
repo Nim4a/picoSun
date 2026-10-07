@@ -1449,11 +1449,16 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Clear glass: paint nothing, wallpaper shows straight through.
+        """Clear glass: wallpaper shows straight through, clicks stay ours.
 
-        No tint, no blur -- the desktop behind is fully visible like a
-        clean window pane. Only the photo, bars and tiles paint themselves.
+        Alpha 1 is invisible over any wallpaper but keeps every pixel
+        hit-testable: with alpha 0 the clicks fall through to whatever is
+        behind the app (the click-through complaint). Only the photo, bars
+        and tiles paint themselves; everything else is clear glass.
         """
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 1))
 
     def closeEvent(self, ev):
         self.close_player()
