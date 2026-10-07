@@ -687,7 +687,12 @@ class Viewer(QMainWindow):
         """Open `path`.  `quiet=True` (navigation) drops the file silently and
         returns False instead of popping a modal dialog, so stepping over one
         bad photo (a camera RAW LibRaw cannot decode, a truncated file) never
-        freezes the strip on an error box."""
+        freezes the strip on an error box.
+
+        Instant-first: the strip tile shows in one blit while the master
+        decodes on a worker thread. The landing fits the photo; a zoom the
+        user started mid-decode wins over the landing (mut-id guard).
+        """
         path = os.path.abspath(path)
         if not os.path.isfile(path):
             return False
@@ -700,9 +705,10 @@ class Viewer(QMainWindow):
         # an explicit open is the point to re-read the folder (the wheel's
         # _select reuses the cached listing while paging inside one folder)
         self._scan_cache = None
-        # The strip's wheel walk waits on this flag: a real photo blocks the UI
-        # thread for a few hundred ms, and stepping again mid-decode is what
-        # made the strip feel like it was spinning.
+        self._scan(path)
+        self._open_epoch = getattr(self.view, "_mut_id", 0)
+        self._select(path)                # tile on screen NOW, ~0ms
+        self.view._zoom_mode = "fit"      # a new photo always lands fitted
         self._loading = True
         try:
             im, meta = master_for(path)
@@ -715,7 +721,13 @@ class Viewer(QMainWindow):
                 QMessageBox.warning(self, APP_NAME,
                                     f"Cannot read this image:\n{meta.get('error', '')}{hint}")
             return False
-        self._land_photo(path, im, meta, True)
+        # the user may have zoomed the tile while the master decoded: keep
+        # their zoom, like the settle landing does
+        if getattr(self.view, "_mut_id", 0) != getattr(self, "_open_epoch", -1):
+            force = None                  # zoomed mid-decode: keep view state
+        else:
+            force = True                  # untouched: land fitted
+        self._land_photo(path, im, meta, force)
         return True
 
 

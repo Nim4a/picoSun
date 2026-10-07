@@ -85,6 +85,24 @@ IMAGE_EXTS = {
 SAVE_EXTS = [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp"] + (
     [".qoi"] if QOI_OK else [])
 
+# icon-pack families: the installer maps each set to one doc icon
+# (photo / raw / hdr / anim). Shared here so the app and the NSI can
+# never disagree about which extension belongs where.
+ANIM_EXTS = {".gif", ".gifv", ".webp", ".apng", ".ani"}
+HDR_EXTS = {".exr", ".hdr", ".pfm", ".fits"}
+
+
+def icon_family(ext: str) -> str:
+    """photo | raw | hdr | anim for a file extension."""
+    e = ext.lower()
+    if e in RAW_EXTS:
+        return "raw"
+    if e in HDR_EXTS:
+        return "hdr"
+    if e in ANIM_EXTS:
+        return "anim"
+    return "photo"
+
 
 # --------------------------------------------------------------------------- params
 
