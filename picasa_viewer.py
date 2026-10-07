@@ -539,14 +539,18 @@ class Viewer(QMainWindow):
     def current(self) -> str:
         return self.folder[self.index] if 0 <= self.index < len(self.folder) else ""
 
-    def open(self, path: str):
+    def open(self, path: str, quiet: bool = False):
+        """Open `path`.  `quiet=True` (navigation) drops the file silently and
+        returns False instead of popping a modal dialog, so stepping over one
+        bad photo (a camera RAW LibRaw cannot decode, a truncated file) never
+        freezes the strip on an error box."""
         path = os.path.abspath(path)
         if not os.path.isfile(path):
-            return
+            return False
         self._wheel_timer.stop()          # an explicit open settles the wheel
         if Path(path).suffix.lower() in VIDEO_EXTS:
             self.open_video(path)
-            return
+            return True
         self.close_player()
         self.settings.setValue("last_dir", os.path.dirname(path))
         # The strip's wheel walk waits on this flag: a real photo blocks the UI
@@ -558,11 +562,14 @@ class Viewer(QMainWindow):
         finally:
             self._loading = False
         if im is None:
-            hint = "\n\nRAW support needs:  pip install rawpy" if meta.get("is_raw") else ""
-            QMessageBox.warning(self, APP_NAME,
-                                f"Cannot read this image:\n{meta.get('error', '')}{hint}")
-            return
+            if not quiet:
+                hint = ("\n\nRAW support needs:  pip install rawpy"
+                        if meta.get("is_raw") else "")
+                QMessageBox.warning(self, APP_NAME,
+                                    f"Cannot read this image:\n{meta.get('error', '')}{hint}")
+            return False
         self._land_photo(path, im, meta, True)
+        return True
 
 
 
@@ -721,9 +728,18 @@ class Viewer(QMainWindow):
             if self.slide_timer.isActive():
                 self.toggle_slideshow()
             return
-        target = self._step_target(delta)
-        if target:
-            self.open(target)
+        n = len(self.folder)
+        idx = self.index + delta
+        while 0 <= idx < n:
+            p = self.folder[idx]
+            if p in self._video_set():
+                idx += delta
+                continue
+            if self.open(p, quiet=True):
+                return
+            # this file cannot be decoded: skip it and keep walking, so one
+            # bad RAW never freezes the strip on a modal error box
+            idx += delta
 
     def _select(self, path: str):
         """Move to `path` without decoding it.
@@ -1403,6 +1419,15 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
+    # Every QMessageBox must be readable no matter what palette Qt inherits
+    # (a translucent-glass app otherwise renders dialog text black-on-black).
+    app.setStyleSheet(
+        "QMessageBox{background:rgba(34,38,50,244);}"
+        "QMessageBox QLabel{color:#eceef0;font-size:12px;}"
+        "QMessageBox QPushButton{background:rgba(88,96,120,255);color:#eceef0;"
+        "border:1px solid rgba(255,255,255,46);border-radius:6px;"
+        "padding:5px 22px;}"
+        "QMessageBox QPushButton:hover{background:rgba(64,70,92,255);}")
     try:
         import ctypes
 
