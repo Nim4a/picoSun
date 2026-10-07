@@ -1750,6 +1750,12 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         from PySide6.QtGui import QPainter, QColor
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        # 2px vertical frame on the left/right edges so the app reads as a
+        # distinct window even when the photo is small (mild translucent
+        # white — invisible over nothing, pops over any wallpaper).
+        c = QColor(255, 255, 255, 96)
+        p.fillRect(0, 0, 2, self.height(), c)
+        p.fillRect(self.width() - 2, 0, 2, self.height(), c)
 
     def closeEvent(self, ev):
         self.close_player()
