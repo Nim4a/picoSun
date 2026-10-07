@@ -60,7 +60,10 @@ class PhotoView(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(64, 64)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # NOTE: no WA_TranslucentBackground -- same Win32 layered-window
+        # reason as the main window (alpha composites against black).
+        # The view paints nothing outside the photo; the window's opaque
+        # dark backdrop shows there instead.
         self.setCursor(Qt.OpenHandCursor)
         self._img_id = 0
 

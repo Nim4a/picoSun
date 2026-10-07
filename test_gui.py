@@ -212,7 +212,8 @@ check("photo strip STAYS in fullscreen", w.preview.isVisible())
 # see test_titlebar for why it had to move
 check("menus hidden in fullscreen", not w.mbar.isVisible())
 check("status bar hidden in fullscreen", not w.status.isVisible())
-check("transparent background mode", w.testAttribute(Qt.WA_TranslucentBackground))
+check("opaque dark backdrop (translucency washed it white)",
+      not w.testAttribute(Qt.WA_TranslucentBackground))
 check("frameless", bool(w.windowFlags() & Qt.FramelessWindowHint))
 w.toggle_fullscreen()
 check("exits fullscreen", not w.isFullScreen())

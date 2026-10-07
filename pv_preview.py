@@ -188,7 +188,8 @@ class _StripList(QListWidget):
         self._glide.setInterval(16)
         self._glide.timeout.connect(self._glide_tick)
         self.setMouseTracking(True)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # NOTE: no WA_TranslucentBackground -- the strip is opaque near-black
+        # by design (Picasa ticker); translucency only washed it gray.
         self.setIconSize(QSize(THUMB_W, THUMB_H))
         self.setGridSize(QSize(31, 49))
         self.setUniformItemSizes(True)

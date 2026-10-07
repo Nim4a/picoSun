@@ -185,7 +185,12 @@ class Viewer(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # NOTE: NO WA_TranslucentBackground here. On Win32 + Qt layered
+        # windows, per-pixel alpha is composited against BLACK, not the
+        # desktop: a 50%-alpha dark fill reads as dark gray, never as
+        # frosted glass, and alpha-0 regions show the window's own black
+        # instead of the wallpaper. The backdrop is painted opaque dark in
+        # paintEvent below; DWM blur (enable_acrylic) gives the frost.
         self.setMinimumSize(560, 380)
         self.settings = self.SETTINGS or QSettings(APP_NAME, APP_NAME)
 
@@ -1429,16 +1434,21 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Frosted dark-glass backdrop over the whole window.
+        """Opaque dark backdrop over the whole window + DWM blur = frost.
 
-        A layered window is hit-tested by its alpha, so this fill also
-        keeps every pixel clickable (alpha 0 belongs to whatever is behind
-        the app). The tint is fixed and dark -- the desktop glows through
-        faintly like frosted glass; nothing is sampled from the photo and
-        nothing is recomputed per image.
+        Per-pixel alpha on this Win32 layered window composites against
+        BLACK, not the desktop, so translucency can never show the
+        wallpaper -- it only washes the fill toward gray (that was the
+        "white theme"). Opaque dark paint + real DWM acrylic blur behind
+        the window is what reads as frosted glass.
         """
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(10, 13, 20, 130))
+        p.fillRect(self.rect(), QColor(13, 16, 23))
+        try:
+            from pv_glass import enable_acrylic
+            enable_acrylic(int(self.winId()))
+        except Exception:
+            pass
 
     def closeEvent(self, ev):
         self.close_player()
