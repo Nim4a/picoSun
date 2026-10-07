@@ -1429,19 +1429,16 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
 
     # ------------------------------------------------------------- lifecycle
     def paintEvent(self, ev):
-        """Claim every pixel of the window for hit-testing.
+        """Frosted dark-glass backdrop over the whole window.
 
-        A layered window is hit-tested by its alpha, so a pixel with alpha 0
-        belongs to whatever is behind the app. Only the photo, the bars and the
-        thumbnail tiles get painted, which left the letterbox and the gaps
-        between thumbnails see-through to the mouse: the wheel over the strip
-        went to the browser underneath instead of scrolling it.
-
-        Alpha 1 is invisible over any wallpaper and children still paint on top,
-        so this costs nothing visually and the whole window is the app's.
+        A layered window is hit-tested by its alpha, so this fill also
+        keeps every pixel clickable (alpha 0 belongs to whatever is behind
+        the app). The tint is fixed and dark -- the desktop glows through
+        faintly like frosted glass; nothing is sampled from the photo and
+        nothing is recomputed per image.
         """
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        p.fillRect(self.rect(), QColor(10, 13, 20, 130))
 
     def closeEvent(self, ev):
         self.close_player()
