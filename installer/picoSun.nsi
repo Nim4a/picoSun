@@ -1,11 +1,13 @@
 ; picoSun installer — portable app folder -> user-local install
 ; Run: makensis.exe picoSun.nsi
 !define APP "picoSun"
-!define VER "1.0.0"
+!define VER "1.0.1"
 !define PUB "Nim4a"
 
 Name "${APP}"
 OutFile "picoSun-setup-${VER}.exe"
+Icon "..\picoSun.ico"
+UninstallIcon "..\picoSun.ico"
 InstallDir "$LOCALAPPDATA\Programs\picoSun"
 RequestExecutionLevel user
 Unicode true
@@ -24,6 +26,7 @@ XPStyle on
 Section "Install"
   SetOutPath "$INSTDIR"
   File /r "..\dist\picoSun\*.*"
+  File /r "..\picoSun.ico"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   SetOutPath "$INSTDIR"
   # launcher scr
@@ -31,11 +34,11 @@ Section "Install"
   FileWrite $0 "@echo off$\r$\n"
   FileWrite $0 '"$INSTDIR\picoSun.exe" %*$\r$\n'
   FileClose $0
-  # desktop shortcut
-  CreateShortCut "$DESKTOP\picoSun.lnk" "$INSTDIR\picoSun.exe"
+  # desktop shortcut (with icon)
+  CreateShortCut "$DESKTOP\picoSun.lnk" "$INSTDIR\picoSun.exe" "" "$INSTDIR\picoSun.ico"
   # start menu shortcut
   CreateDirectory "$SMPROGRAMS\picoSun"
-  CreateShortCut "$SMPROGRAMS\picoSun\picoSun.lnk" "$INSTDIR\picoSun.exe"
+  CreateShortCut "$SMPROGRAMS\picoSun\picoSun.lnk" "$INSTDIR\picoSun.exe" "" "$INSTDIR\picoSun.ico"
   CreateShortCut "$SMPROGRAMS\picoSun\Uninstall.lnk" "$INSTDIR\uninstall.exe"
   # registry: silent
   WriteRegStr HKCU "Software\picoSun" "InstallDir" "$INSTDIR"

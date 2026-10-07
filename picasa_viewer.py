@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QAction,
     QColor,
     QCursor,
+    QIcon,
     QKeySequence,
     QPainter,
     QShortcut,
@@ -45,6 +46,21 @@ import pv_core as core
 from pv_core import Develop, decode, render
 from pv_panel import CropOverlay, DevelopPanel
 from pv_preview import MEDIA_EXTS, VIDEO_EXTS, PreviewBar
+
+def _icon_path() -> str:
+    """Locate picoSun.ico in the bundle (_MEIPASS) or next to the sources."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "picoSun.ico")
+
+def app_icon():
+    """The app icon, built lazily AFTER QApplication exists (QIcon construction
+    without one hard-crashes the process)."""
+    try:
+        if os.path.isfile(_icon_path()):
+            return QIcon(_icon_path())
+    except Exception:  # pragma: no cover
+        return None
+    return None
 from pv_ui_chrome import APP_NAME, Chrome, InfoPanel, NavBar
 from pv_ui_common import human_size, pil_to_pixmap
 from pv_view import PhotoView
@@ -1440,6 +1456,10 @@ def main() -> int:
     target = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
     path = resolve_target(target)
     w = Viewer(path)
+    try:
+        w.setWindowIcon(app_icon())
+    except Exception:
+        pass
     w.show()
     try:
         from pv_glass import enable_acrylic
