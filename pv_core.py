@@ -51,6 +51,13 @@ try:
 except Exception:  # pragma: no cover
     RAW_OK = False
 
+try:
+    import OpenEXR
+
+    HDR_OK = True
+except Exception:  # pragma: no cover
+    HDR_OK = False
+
 
 RAW_EXTS = {
     ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".arq", ".srf", ".sr2",
@@ -74,8 +81,9 @@ IMAGE_EXTS = {
     ".wpg",
 } | RAW_EXTS
 
-# formats Qt/Pillow can save
-SAVE_EXTS = [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp"]
+# formats Qt/Pillow can save (QOI only when the plugin is present)
+SAVE_EXTS = [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp"] + (
+    [".qoi"] if QOI_OK else [])
 
 
 # --------------------------------------------------------------------------- params
@@ -157,9 +165,34 @@ def is_raw(path: str) -> bool:
 # A viewer pages back and forth over the same files. The decode was the whole
 # per-page stall (~500ms for 12MP), and the strip decoded every tile AGAIN
 # from disk: one folder open decoded N photos twice. Cache the master by
-# (mtime, size, path) so a revisit costs nothing. Bounded (LRU, 12 masters)
+# (mtime, size, path) so a revisit costs nothing. Bounded (LRU, N masters)
 # and on RAW_CACHE_MISS nothing changes -- the first decode still pays full.
-_MASTER_CACHE_MAX = 12
+# ponytail: the bound adapts to free RAM at import (1 master per ~1.5GB, 6..24
+# on this box). Upgrade path is per-image cost accounting if masters get huge.
+def _cache_max() -> int:
+    try:
+        import ctypes
+        from ctypes import Structure, byref, c_ulong, c_ulonglong, windll
+
+        class _MS(Structure):
+            _fields_ = [("dwLength", c_ulong), ("dwMemoryLoad", c_ulong),
+                        ("ullTotalPhys", c_ulonglong),
+                        ("ullAvailPhys", c_ulonglong),
+                        ("ullTotalPageFile", c_ulonglong),
+                        ("ullAvailPageFile", c_ulonglong),
+                        ("ullTotalVirtual", c_ulonglong),
+                        ("ullAvailVirtual", c_ulonglong),
+                        ("ullAvailExtendedVirtual", c_ulonglong)]
+        ms = _MS()
+        ms.dwLength = ctypes.sizeof(_MS)
+        windll.kernel32.GlobalMemoryStatusEx(byref(ms))
+        gb = ms.ullAvailPhys / 1e9
+        return max(6, min(24, int(gb / 1.5)))
+    except Exception:
+        return 12
+
+
+_MASTER_CACHE_MAX = _cache_max()
 _master_cache: dict[tuple, tuple] = {}
 _master_order: list = []
 
@@ -202,8 +235,22 @@ def decode(path: str) -> tuple[Image.Image | None, dict]:
         except Exception as e:  # pragma: no cover
             return None, {**meta, "error": f"RAW decode failed: {e}"}
 
+    if ext == ".exr":
+        if not HDR_OK:
+            return None, {**meta, "error": "OpenEXR is not installed"}
+        try:
+            return _decode_hdr(path, meta)
+        except Exception as e:  # pragma: no cover
+            return None, {**meta, "error": f"HDR decode failed: {e}"}
+
     try:
         with Image.open(path) as im:
+            # multi-frame (GIF/WEBP/APNG/TIFF/ICO): frame 0 is the master;
+            # the count rides in meta and frame navigation re-seeks the file
+            try:
+                n_frames = getattr(im, "n_frames", 1) or 1
+            except Exception:
+                n_frames = 1
             im.load()
             try:
                 im = ImageOps.exif_transpose(im)
@@ -214,9 +261,22 @@ def decode(path: str) -> tuple[Image.Image | None, dict]:
             meta["icc"] = info.get("icc_profile")
             im = im.convert("RGB")
             meta.update(_exif_from(im, meta["exif"]))
+            if n_frames > 1:
+                meta["n_frames"] = n_frames
             return im, meta
     except Exception as e:
         return None, {**meta, "error": str(e)}
+
+
+def frame_at(path: str, index: int):
+    """One frame of a multi-frame file as RGB, or None. Seek-on-demand."""
+    try:
+        with Image.open(path) as im:
+            im.seek(index)
+            im.load()
+            return ImageOps.exif_transpose(im).convert("RGB")
+    except Exception:
+        return None
 
 
 def _decode_raw(path: str, meta: dict) -> tuple[Image.Image, dict]:
@@ -252,6 +312,66 @@ def _decode_raw(path: str, meta: dict) -> tuple[Image.Image, dict]:
     a16 = arr.astype(np.uint16)
     im = Image.fromarray((a16 >> 8).astype(np.uint8), "RGB")
     return im, meta
+
+
+def _decode_hdr(path: str, meta: dict) -> tuple[Image.Image, dict]:
+    """Float EXR -> displayable RGB via filmic tone map.
+
+    Same contract as _decode_raw: full float data maps to 8-bit for the
+    master, so every edit/zoom/save path works unchanged. Meta carries both
+    the raw float range and the tonemap params, so the viewer can re-map
+    without re-reading the file.
+    """
+    import Imath
+
+    f = OpenEXR.InputFile(path)
+    try:
+        hdr = f.header()
+        dw = hdr["dataWindow"]
+        W, H = dw.max.x - dw.min.x + 1, dw.max.y - dw.min.y + 1
+        chans = set(hdr["channels"].keys())
+        pt = Imath.PixelType(Imath.PixelType.FLOAT)
+        if chans >= {"R", "G", "B"}:
+            rgb = [np.frombuffer(f.channel(c, pt), dtype=np.float32).reshape(H, W)
+                   for c in "RGB"]
+            a = np.stack(rgb, axis=-1)
+        elif "Y" in chans:
+            y = np.frombuffer(f.channel("Y", pt), dtype=np.float32).reshape(H, W)
+            a = np.stack([y, y, y], axis=-1)
+        else:  # pragma: no cover
+            c0 = sorted(chans)[0]
+            y = np.frombuffer(f.channel(c0, pt), dtype=np.float32).reshape(H, W)
+            a = np.stack([y, y, y], axis=-1)
+    finally:
+        f.close()
+    a = np.nan_to_num(a, nan=0.0, posinf=1e6, neginf=0.0)
+    lo, hi = float(a.min()), float(np.percentile(a, 99.9))
+    meta.update({"is_hdr": True, "hdr_lo": lo, "hdr_hi": hi,
+                 "hdr_exposure": 0.0, "hdr_key": 0.18})
+    im = _tonemap_hdr(a, 0.0, 0.18)
+    return im, meta
+
+
+def _tonemap_hdr(a: np.ndarray, exposure: float, key: float) -> Image.Image:
+    """Filmic-ish map of float RGB to 8-bit sRGB: exposure, key normalize, shoulder.
+
+    The peak is measured on the UNEXPOSED data: exposure then really moves
+    brightness (measuring after the shift normalizes it straight back out,
+    which made the EV slider a no-op).
+    """
+    lum_w = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    peak = max(float(np.percentile(a, 99.9)), 1e-6)
+    x = np.clip(a * (2.0 ** exposure) * (key / peak), 0.0, None)
+    # shoulder: x*(2.51x+0.03)/(x^2*2.43+0.59x+0.14), then gamma
+    num = x * (2.51 * x + 0.03)
+    den = x * x * 2.43 + x * 0.59 + 0.14
+    t = np.clip(num / np.maximum(den, 1e-6), 0.0, 1.0)
+    lum = t @ lum_w
+    g = np.clip(lum, 0.0, 1.0) ** (1.0 / 2.2)
+    scale = np.divide(g, np.maximum(lum, 1e-6), out=np.ones_like(g),
+                      where=lum > 1e-6)[..., None]
+    out = np.clip(t * scale, 0.0, 1.0)
+    return Image.fromarray((out * 255.0 + 0.5).astype(np.uint8), "RGB")
 
 
 def _fmt_shutter(v) -> str:
