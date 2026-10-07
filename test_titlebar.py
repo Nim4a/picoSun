@@ -113,12 +113,14 @@ send(QMouseEvent.Type.MouseButtonRelease, 380, 68,
      Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
 check("releasing ends the drag", ch._drag is None)
 
-# ---- 4. fullscreen keeps the title bar so close/exit stay reachable ---------
+# ---- 4. fullscreen drops ALL bars; only the floating X stays ---------------
 w.toggle_fullscreen()
 for _ in range(6):
     app.processEvents()
 check("fullscreen hides the title bar (floating X replaces it)", not ch.isVisible())
 check("floating exit-X shown in fullscreen", w._fs_exit.isVisible())
+check("fullscreen hides the nav bar too", not w.nav.isVisible())
+check("fullscreen hides the filmstrip too", not w.preview.isVisible())
 w.toggle_fullscreen()
 for _ in range(6):
     app.processEvents()

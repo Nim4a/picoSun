@@ -273,17 +273,15 @@ class PhotoView(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        if not self._pm or self._pm.isNull():
-            if self.chrome:
-                # Empty state: a real dark canvas, not a 20%-alpha window that
-                # let the desktop smudge through and read as a broken render.
-                p.fillRect(self.rect(), QColor(14, 16, 22, 210))
-                p.setPen(QColor(226, 229, 236))
-                f = p.font()
-                f.setPointSize(max(11, f.pointSize() + 3))
-                p.setFont(f)
-                p.drawText(self.rect(), Qt.AlignCenter,
-                           "No image  —  drop a photo here  ·  Ctrl+O")
+        # the photo floats on nothing: no canvas fill, the desktop shows
+        # straight through around it (empty state included)
+        if self._pm is None or self._pm.isNull():
+            p.setPen(QColor(226, 229, 236))
+            f = p.font()
+            f.setPointSize(max(11, f.pointSize() + 3))
+            p.setFont(f)
+            p.drawText(self.rect(), Qt.AlignCenter,
+                       "No image  —  drop a photo here  ·  Ctrl+O")
             return
         if self._prev_pm is not None and self._fade < 1.0:
             # crossfade, jump-free: the NEW photo draws full-strength first;

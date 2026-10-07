@@ -364,8 +364,11 @@ class Viewer(QMainWindow):
         # windowed for anyone whose saved state was written before the key ever
         # existed, so a plain install never came up fullscreen. closeEvent
         # always writes the key, so an explicit windowed close still sticks.
-        want_full = first_run or bool(self.settings.value("fullscreen", True, bool))
-        QTimer.singleShot(0, self._enter_fullscreen if want_full else self._center)
+        # EVERY launch starts fullscreen -- no restore, no centring. The user
+        # leaves with F / double-click / ✕ and the next launch is fullscreen
+        # again. (The saved geometry/fullscreen keys are still written so the
+        # windowed size survives a fullscreen->windowed round trip.)
+        QTimer.singleShot(0, self._enter_fullscreen)
 
     def _center(self):
         scr = QApplication.primaryScreen()
@@ -448,12 +451,15 @@ class Viewer(QMainWindow):
             self.showMaximized()
 
     def _set_chrome_visible(self, on: bool):
-        """Fullscreen drops the title bar (a floating ✕ replaces it), the menus
-        and the status bar -- the bottom bar stays because it carries the strip
-        and the transport controls."""
+        """Windowed mode shows the title bar, menus and status bar.
+
+        Fullscreen drops ALL of them -- nav bar included. The only chrome
+        left in fullscreen is the floating ✕, which leaves fullscreen (the
+        app keeps running)."""
         self.chrome.setVisible(on)
         self.chrome.set_buttons_visible(on)
-        self.nav.setVisible(True)
+        self.nav.setVisible(on)
+        self.preview.setVisible(on and self.a_film.isChecked())
         self.mbar.setVisible(on)
         self.status.setVisible(on)
 

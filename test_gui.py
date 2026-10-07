@@ -25,6 +25,7 @@ _TEST_INI = Path(tempfile.gettempdir()) / "pv_test_settings.ini"
 if _TEST_INI.exists():
     _TEST_INI.unlink()
 _test_settings = QSettings(str(_TEST_INI), QSettings.IniFormat)
+_test_settings.setValue("fullscreen", False)   # tests start windowed
 picasa_viewer.Viewer.SETTINGS = _test_settings
 
 fails = []
@@ -171,8 +172,13 @@ check("info panel has size row", "1600" in w.info.box.text())
 w.toggle_film()
 check("preview strip opens with thumbs", w.preview.isVisible() and w.preview.list.count() == 3,
       f"{w.preview.list.count()} thumbs")
-check("filmstrip has real pixmaps", w.preview.list.count() > 0 and
-      not w.preview.list.item(0).icon().pixmap(64, 54).isNull())
+# thumbs decode on a worker pool; wait for the first one before asserting
+import time as _t
+_dead = _t.time() + 45
+while _t.time() < _dead and w.preview.thumb_for(w.folder[0]) is None:
+    app.processEvents()
+    _t.sleep(0.15)
+check("filmstrip has real pixmaps", w.preview.thumb_for(w.folder[0]) is not None)
 w.toggle_film()
 w.toggle_edit()
 w.toggle_info()
@@ -188,24 +194,19 @@ for _ in range(6):
 # The bar drops controls when it is narrow, so give it a realistic fullscreen
 # width before asking whether Exit is there -- otherwise this asserts the
 # width policy instead of the fullscreen behaviour.
+# The bottom bar is GONE in fullscreen -- only the floating X stays. Hiding
+# everything with the rest of the chrome left a frameless fullscreen window
+# with no visible way out before; that is why the floating X exists, and it
+# leaves fullscreen instead of quitting the app.
 check("fullscreen on", w.isFullScreen())
 check("title bar hidden in fullscreen (floating X replaces it)", not w.chrome.isVisible())
 check("floating exit-X visible in fullscreen", w._fs_exit.isVisible())
 check("window buttons hidden in fullscreen",
       not w.chrome.btn_min.isVisible() and not w.chrome.btn_close.isVisible())
-check("chrome.exit leaves fullscreen, not the app", callable(w._chrome_exit))
-# The bottom bar STAYS in fullscreen. Hiding it along with the rest of the
-# chrome left a frameless fullscreen window with no visible way out, which is
-# why Exit lives on the bar.
-check("nav stays in fullscreen so Exit is reachable", w.nav.isVisible())
-# Assert the MODE, not the pixel visibility of every control: the bar drops
-# controls when it is narrow, so on a small offscreen window Exit can be hidden
-# for lack of room and that says nothing about fullscreen. Whether Exit is
-# actually drawn at a realistic width is test_navbar's job.
-check("…and the bar is told it is fullscreen",
-      w.nav._fullscreen is True)
-check("…and the minimise/maximise/close cluster is gone",
-      not w.nav.win_col.isVisible())
+check("top-right X leaves fullscreen, not the app",
+      w._chrome_exit.__doc__ and "leaves fullscreen" in w._chrome_exit.__doc__)
+check("nav hidden in fullscreen (only the X stays)", not w.nav.isVisible())
+check("filmstrip hidden in fullscreen too", not w.preview.isVisible())
 # the menu bar is a child of ours now, not the QMainWindow own one --
 # see test_titlebar for why it had to move
 check("menus hidden in fullscreen", not w.mbar.isVisible())
@@ -258,24 +259,30 @@ for _ in range(8):
     app.processEvents()
 check("first run opens fullscreen", w2.isFullScreen(), f"fullscreen={w2.isFullScreen()}")
 check("first run shows floating exit-X", w2._fs_exit.isVisible() or True)
-check("first run keeps the bar (Exit must be reachable)",
-      w2.nav.isVisible())
-check("first run shows Exit, not the window buttons",
-      w2.nav.btn_exit.isVisible() and not w2.nav.win_col.isVisible())
+check("fullscreen hides ALL bars (only the floating X stays)",
+      not w2.nav.isVisible() and not w2.preview.isVisible()
+      and not w2.chrome.isVisible() and not w2.mbar.isVisible()
+      and not w2.status.isVisible(),
+      f"nav={w2.nav.isVisible()} preview={w2.preview.isVisible()} "
+      f"chrome={w2.chrome.isVisible()} mbar={w2.mbar.isVisible()} "
+      f"status={w2.status.isVisible()}")
 check("first run photo is loaded", w2.current().endswith("pic1.jpg"))
 check("first run fits the photo", w2.view.is_fit and w2.view.scale > 0,
       f"scale={w2.view.scale:.3f}")
 w2.toggle_fullscreen()
 check("can leave fullscreen", not w2.isFullScreen())
+check("leaving fullscreen brings the bars back",
+      w2.nav.isVisible() and w2.preview.isVisible() and w2.chrome.isVisible())
 w2.close()
 
-# a *second* launch of that same fresh profile remembers the windowed choice
+# EVERY launch starts fullscreen now -- there is no restore path to test:
+# the second launch of the same profile is fullscreen too
 picasa_viewer.Viewer.SETTINGS = QSettings(str(_fresh_ini), QSettings.IniFormat)
 w3 = picasa_viewer.Viewer(str(Path(__file__).parent / "testpics" / "pic1.jpg"))
 w3.show()
 for _ in range(8):
     app.processEvents()
-check("later launch restores windowed mode", not w3.isFullScreen(),
+check("EVERY launch opens fullscreen, not just the first", w3.isFullScreen(),
       f"fullscreen={w3.isFullScreen()}")
 w3.close()
 picasa_viewer.Viewer.SETTINGS = _test_settings

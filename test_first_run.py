@@ -1,5 +1,9 @@
-"""First run must open fullscreen — and must keep doing so no matter what a
-previous session saved. This is the check that catches a polluted profile."""
+"""First run must open fullscreen — and EVERY later run too.
+
+The app always starts fullscreen now: there is no restore path. This test
+pins that (fresh profile = fullscreen, second launch = fullscreen again)
+and the Reset Window State menu item that clears the saved windowed size.
+"""
 from __future__ import annotations
 
 import os
@@ -58,9 +62,9 @@ def launch(ini_path, leave_fullscreen=False):
 ini = fresh_ini("fresh")
 check("first run opens fullscreen", launch(ini, leave_fullscreen=True))
 
-# --- a second run restores what the user left behind -------------------------
-check("second run restores the saved windowed mode", not launch(ini),
-      "user left it windowed, so it must not force fullscreen again")
+# --- EVERY run is fullscreen now: leaving windowed does NOT stick -----------
+check("second run is fullscreen too (no restore path)", launch(ini),
+      "every launch starts fullscreen, windowed is only for the session")
 
 # --- Reset Window State is the way back --------------------------------------
 picasa_viewer.Viewer.SETTINGS = QSettings(str(ini), QSettings.IniFormat)
@@ -80,16 +84,14 @@ ini2 = fresh_ini("fs")
 QSettings(str(ini2), QSettings.IniFormat).setValue("fullscreen", True)
 check("a profile saved as fullscreen opens fullscreen", launch(ini2))
 
-# --- and the real app's registry key is what _restore_state reads -----------
+# --- and the real app's startup is unconditional -----------------------------
 sig = inspect_restore = None
 try:
     import inspect
     src_lines = src.splitlines()
     body = "\n".join(src_lines)
-    check("first-run detection is 'no saved geometry'",
-          'first_run = geo is None' in body)
-    check("…and it forces fullscreen when true",
-          "first_run or bool(self.settings.value(\"fullscreen\"" in body)
+    check("startup always enters fullscreen (no restore branch)",
+          "QTimer.singleShot(0, self._enter_fullscreen)" in body)
 except Exception as exc:  # pragma: no cover
     check("source inspection", False, str(exc))
 

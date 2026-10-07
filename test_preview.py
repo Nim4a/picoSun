@@ -96,12 +96,18 @@ ini = Path(tempfile.gettempdir()) / "pv_preview_test.ini"
 if ini.exists():
     ini.unlink()
 picasa_viewer.Viewer.SETTINGS = QSettings(str(ini), QSettings.IniFormat)
-picasa_viewer.Viewer.SETTINGS.setValue("geometry", b"")
+picasa_viewer.Viewer.SETTINGS.setValue("geometry", b"")  # kills first-run; tests start windowed
 
 w = picasa_viewer.Viewer(str(MIX / "a_photo.jpg"))
 w.resize(1400, 800)
 w.show()
 for _ in range(6):
+    app.processEvents()
+# the app ALWAYS starts fullscreen now: normalise to windowed so the strip
+# checks below start from a known state
+if w.isFullScreen():
+    w.toggle_fullscreen()
+for _ in range(4):
     app.processEvents()
 
 check("preview strip visible by default", w.preview.isVisible())
@@ -118,19 +124,23 @@ check("strip got every item", w.preview.list.count() == 5,
 check("strip knows the videos",
       len(w.preview.videos) == 2, f"{len(w.preview.videos)}")
 
-# thumbnails arrive asynchronously from the worker pool
+# --- thumbnails arrive asynchronously from the worker pool; the worker
+# stores into _PIXMAP_ROLE (the icon stays empty so the delegate's cover
+# fill is the only copy) -------------------------------------------------
 deadline = time.time() + 45
 while time.time() < deadline:
     app.processEvents()
-    icons = all(not w.preview.list.item(i).icon().isNull()
-                for i in range(w.preview.list.count()))
+    thumbs = all(w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE) is not None
+                 and not w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE).isNull()
+                 for i in range(w.preview.list.count()))
     metas = all(":" in w.preview.list.item(i).toolTip()
                 for i in range(3, 5))
-    if icons and metas:
+    if thumbs and metas:
         break
     time.sleep(0.15)
 check("every tile got a thumbnail",
-      all(not w.preview.list.item(i).icon().isNull()
+      all(w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE) is not None
+          and not w.preview.list.item(i).data(pv_preview._PIXMAP_ROLE).isNull()
           for i in range(w.preview.list.count())))
 
 # the strip must contain exactly what the folder scan found
@@ -168,8 +178,8 @@ check("current item highlighted in strip",
 # wheel moves to the next/previous FILE rather than scrolling the strip
 # sideways. The strip then glides to whichever tile became current.
 strip = _StripList()
-strip.resize(300, 78)
-strip.setFixedWidth(300)
+strip.resize(120, 50)
+strip.setFixedWidth(120)
 for p in sorted(MIX.iterdir()):
     it = QListWidgetItem()
     it.setIcon(QIcon(placeholder(p)))
