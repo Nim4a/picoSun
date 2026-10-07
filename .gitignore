@@ -1,3 +1,7 @@
+# release artifacts
+picoSun-*.zip
+picoSun-setup-*.exe
+
 # venv / build artifacts
 .venv/
 build/
