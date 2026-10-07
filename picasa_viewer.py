@@ -187,6 +187,12 @@ class Viewer(QMainWindow):
         self.mbar = QMenuBar(self)
         self.mbar.setStyleSheet("background:rgba(18,20,26,180);color:#eceef0;")
         self.view = PhotoView(self)
+        # The floating bars are positioned from the view's rect, which the
+        # layout only settles AFTER the window's resizeEvent has run -- so
+        # syncing from resizeEvent alone left the nav/strip at their default
+        # 100px-wide geometry (a half-cut bar top-left) until the next resize.
+        # The view's own Resize is the signal that is never early.
+        self.view.installEventFilter(self)
         self.crop_overlay = CropOverlay(self.view)
         self.crop_overlay.hide()
         self.crop_overlay.committed.connect(self._crop_apply)
@@ -685,9 +691,16 @@ class Viewer(QMainWindow):
             except Exception:
                 pass
             self._player = None
-        self.view.removeEventFilter(self)
+        # the event filter stays installed: it also carries the view-resize
+        # re-sync the floating bars depend on
 
     def eventFilter(self, obj, ev):
+        # the photo area's rect is what the floating bars are placed against;
+        # re-sync whenever it changes (the window resizeEvent fires before the
+        # layout settles, so this is the reliable hook)
+        if obj is self.view and ev.type() == QEvent.Resize:
+            self._sync_bars()
+            return False
         # double-click anywhere on the photo area closes the video
         if obj is self.view and ev.type() in (QEvent.MouseButtonDblClick,
                                               QEvent.KeyPress):

@@ -135,5 +135,29 @@ for _ in range(4):
 check("…and F brings it back fullscreen with no bar", w.isFullScreen())
 w.preview.shutdown()
 
+# --- empty state: the nav/strip are placed from the view's rect, which the
+# layout only settles after the window's resizeEvent. Syncing from the window
+# alone left a 76px-wide half-cut bar stuck at the top-left of an empty window.
+w2 = picasa_viewer.Viewer(None)
+w2.resize(1200, 800)
+w2.show()
+for _ in range(10):
+    app.processEvents()
+nav2 = w2.nav
+check("empty window: nav spans the photo area, not a clipped stub",
+      nav2.width() >= w2.view.width() - 30,
+      f"nav {nav2.width()}px vs view {w2.view.width()}px")
+check("empty window: nav sits at the bottom of the photo area",
+      nav2.y() > w2.view.height() // 2,
+      f"nav y={nav2.y()} view h={w2.view.height()}")
+check("empty window: no control hangs off the bar",
+      all(0 <= nav2.mapFromGlobal(b.mapToGlobal(b.rect().topLeft())).x()
+          and nav2.mapFromGlobal(b.mapToGlobal(b.rect().topLeft())).x()
+          + b.width() <= nav2.width()
+          for b in nav2.findChildren(QPushButton) if b.isVisible()),
+      "a button is clipped in the empty state")
+w2.preview.shutdown()
+w2.close()
+
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

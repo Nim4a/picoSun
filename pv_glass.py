@@ -41,7 +41,7 @@ def enable_acrylic(hwnd: int, tint: int = 0x3AF0F6FC) -> bool:
 
 
 def paint_glass(widget, p: QPainter,
-                scrim: QColor = QColor(16, 20, 30, 30),
+                scrim: QColor = QColor(14, 16, 22, 180),
                 sheen: int = 96):
     """Liquid glass with a fixed DARK tint -- the bars never sample the photo.
 
