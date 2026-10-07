@@ -538,8 +538,14 @@ class Viewer(QMainWindow):
         v = mb.addMenu("&View")
         v.addAction(self._act("Zoom &In", lambda: self.view.step_zoom(1), "+"))
         v.addAction(self._act("Zoom &Out", lambda: self.view.step_zoom(-1), "-"))
-        v.addAction(self._act("&Fit Window", self.view.fit, "0"))
+        v.addAction(self._act("&Fit Window", lambda: self.view.fit("fit"), "0"))
         v.addAction(self._act("&Actual Size", self.view.actual_size, "1"))
+        v.addSeparator()
+        v.addAction(self._act("Scale to &Width", lambda: self.view.fit("width"), "W"))
+        v.addAction(self._act("Scale to &Height", lambda: self.view.fit("height"), "H"))
+        v.addAction(self._act("Scale to &Fill", lambda: self.view.fit("fill"), "Shift+F"))
+        v.addSeparator()
+        v.addAction(self._act("Zoom &Lock (keep this zoom on next photo)", self._toggle_zoom_lock, "L"))
         v.addSeparator()
         v.addAction(self._act("Reset Window &State",
                                self.reset_window_state,
@@ -593,8 +599,12 @@ class Viewer(QMainWindow):
         b("+", lambda: self.view.step_zoom(1))
         b("=", lambda: self.view.step_zoom(1))
         b("-", lambda: self.view.step_zoom(-1))
-        b("0", self.view.fit)
+        b("0", lambda: self.view.fit("fit"))
         b("1", self.view.actual_size)
+        b("W", lambda: self.view.fit("width"))
+        b("H", lambda: self.view.fit("height"))
+        b("Shift+F", lambda: self.view.fit("fill"))
+        b("L", self._toggle_zoom_lock)
         b("R", lambda: self.rotate(90))
         b("Shift+R", lambda: self.rotate(-90))
         b("F", self.toggle_fullscreen)
@@ -672,6 +682,12 @@ class Viewer(QMainWindow):
         # so it counts as loading too
         if force_fit is None:
             force_fit = self.view.is_fit
+        if getattr(self, "_zoom_lock", False):
+            # locked: keep this photo's zoom for the next one
+            force_fit = False
+            keep_scale = self.view.scale
+            keep_mode = getattr(self.view, "_zoom_mode", "fit")
+            keep_fit = self.view.is_fit
         self._loading = True
         try:
             self.base = im
@@ -686,9 +702,17 @@ class Viewer(QMainWindow):
             # a landing IS a photo change: crossfade from what was on screen
             self._land_fade = True
             try:
-                self.rebuild(draft=False, force_fit=True)
+                self.rebuild(draft=False, force_fit=force_fit)
             finally:
                 self._land_fade = False
+            if getattr(self, "_zoom_lock", False) and not keep_fit:
+                # locked zoom survives the new photo's different dimensions:
+                # re-apply the previous scale/mode on the fresh pixmap.
+                try:
+                    self.view._zoom_mode = keep_mode
+                    self.view.set_scale(keep_scale)
+                except Exception:
+                    pass
             self._update_title()
         finally:
             self._loading = False
@@ -1220,6 +1244,19 @@ class Viewer(QMainWindow):
         self._set_chrome_visible(on)
         self.view.chrome = on
         self.view.update()
+
+    def _toggle_zoom_lock(self):
+        """Lock Zoom: the next photo keeps this photo's zoom, not fit.
+
+        Default landing fits every photo; with lock on, _land_photo keeps
+        the current scale/mode so a batch of photos can be compared at the
+        same size. Off again returns to fit-on-land.
+        """
+        on = not getattr(self, "_zoom_lock", False)
+        self._zoom_lock = on
+        m = {True: "locked — next photo keeps this zoom",
+             False: "unlocked — next photo fits"}[on]
+        self.status.showMessage(f"Zoom {m}", 2500)
 
     def toggle_film(self):
         show = not self.preview.isVisible()

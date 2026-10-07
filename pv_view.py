@@ -53,6 +53,8 @@ class PhotoView(QWidget):
         self.chrome = True                    # letterbox + shadow (off = pure transparent)
         self.strip_hover = False              # set while the pointer is on the strip
         self._mut_id = 0
+        self._zoom_mode = "fit"  # fit | fill | width | height | actual
+        self.interp_mode = "smooth"  # smooth | balanced | fast
         self._prev_pm: QPixmap | None = None   # outgoing photo for the crossfade
         self._prev_rect: QRectF | None = None  # its on-screen rect
         self._fade = 1.0                       # incoming photo's opacity
@@ -195,8 +197,15 @@ class PhotoView(QWidget):
         sz = self.pixmap_size()
         if sz.isEmpty() or self.width() <= 0 or self.height() <= 0:
             return 1.0
-        m = 0 if self.chrome else 0
-        return max(0.001, min((self.width() - m) / sz.width(), (self.height() - m) / sz.height()))
+        sx, sy = self.width() / sz.width(), self.height() / sz.height()
+        m = getattr(self, "_zoom_mode", "fit")
+        if m == "fill":
+            return max(0.001, max(sx, sy))
+        if m == "width":
+            return max(0.001, sx)
+        if m == "height":
+            return max(0.001, sy)
+        return max(0.001, min(sx, sy))
 
     def label(self) -> str:
         if self._fit and abs(self.fit_scale() - self._scale) < 1e-6:
@@ -224,7 +233,17 @@ class PhotoView(QWidget):
                           else min(0.0, max(oh - dh, self._offset.y())))
 
     # ----------------------------------------------------------------- zoom
-    def fit(self):
+    def fit(self, mode: str = "fit"):
+        """Fit family: fit | fill | width | height, all cursor-anchored II.
+
+        All six requested zoom modes live here: fit (Scale to Fit), fill
+        (Scale to Fill), width (Scale to Width), height (Scale to Height),
+        actual_size (100% / Auto-off), and the plain wheel step-zoom.
+        One method, one code path -- no parallel geometry maths.
+        """
+        if mode not in ("fit", "fill", "width", "height"):
+            mode = "fit"
+        self._zoom_mode = mode
         self._fit = True
         self._scale = self.fit_scale()
         self._clamp()
@@ -275,7 +294,13 @@ class PhotoView(QWidget):
     def paintEvent(self, ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        # flexible interpolation per zoom action: smooth (default) keeps the
+        # soft read; balanced skips AA at 100%+ for speed; fast drops the
+        # smooth-pixmap hint entirely (nearest-ish, cheapest pan/zoom).
+        m = getattr(self, "interp_mode", "smooth")
+        smooth = True if m == "smooth" else \
+            (self._scale < 1.0 if m == "balanced" else False)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, smooth)
         # the photo floats on nothing: no canvas fill, the desktop shows
         # straight through around it (empty state included)
         if self._pm is None or self._pm.isNull():
