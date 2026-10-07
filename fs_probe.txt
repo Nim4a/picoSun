@@ -1,0 +1,7 @@
+screen: 1603x902
+isFullScreen: True
+window rect: 1603x902 at (0,0)
+windowState fullscreen flag: True
+chrome visible: False | mbar visible: False | status visible: False
+nav rect: (12, 838, 1579, 52) | nav visible: True
+preview visible: True | fs_exit visible: True

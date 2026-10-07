@@ -47,9 +47,9 @@ def img_point(v, px, py):
     return ((px - r.x()) / v.scale, (py - r.y()) / v.scale)
 
 
-def wheel(v, delta, px, py):
+def wheel(v, delta, px, py, mods=Qt.NoModifier):
     ev = QWheelEvent(QPointF(px, py), QPointF(px, py), QPoint(0, 0), QPoint(0, delta),
-                     Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+                     Qt.NoButton, mods, Qt.NoScrollPhase, False)
     QApplication.sendEvent(v, ev)
     for _ in range(3):
         app.processEvents()
@@ -145,7 +145,7 @@ check("…and goes back to where it was", w.current() == first_photo,
       Path(w.current()).name)
 w.step = origin_step
 
-# over the picture itself it still zooms
+# over the picture: a plain wheel pages the folder, Ctrl+wheel zooms
 w.view.fit()
 for _ in range(4):
     app.processEvents()
@@ -153,7 +153,13 @@ before = w.view.scale
 steps.clear()
 on_photo = w.view.target_rect().center()
 wheel(w.view, 120, on_photo.x(), on_photo.y())
-check("wheel over the photo still zooms", not steps and w.view.scale > before,
+check("plain wheel over the photo pages the folder (not zoom)",
+      bool(steps) and w.view.scale == before,
+      f"scale {before:.4f} -> {w.view.scale:.4f}, emitted {steps}")
+steps.clear()
+wheel(w.view, 120, on_photo.x(), on_photo.y(), Qt.ControlModifier)
+check("Ctrl+wheel over the photo zooms",
+      not steps and w.view.scale > before,
       f"scale {before:.4f} -> {w.view.scale:.4f}, emitted {steps}")
 w.preview.shutdown()
 
@@ -187,32 +193,32 @@ v = make_view(1.0)
 p0 = img_point(v, CX, CY)
 worst = 0.0
 for _ in range(8):
-    wheel(v, 120, CX, CY)
+    wheel(v, 120, CX, CY, Qt.ControlModifier)
     p = img_point(v, CX, CY)
     worst = max(worst, abs(p[0] - p0[0]), abs(p[1] - p0[1]))
-check("wheel-in keeps the point under the cursor", worst < 0.5,
+check("Ctrl+wheel-in keeps the point under the cursor", worst < 0.5,
       f"worst drift {worst:.3f}px after 8 steps, scale={v.scale:.3f}")
-check("wheel-in actually zoomed", v.scale > 1.0, f"scale={v.scale:.3f}")
+check("Ctrl+wheel-in actually zoomed", v.scale > 1.0, f"scale={v.scale:.3f}")
 
 # --- wheel zoom out ----------------------------------------------------------
 ref = img_point(v, CX, CY)
 worst = 0.0
 for _ in range(8):
-    wheel(v, -120, CX, CY)
+    wheel(v, -120, CX, CY, Qt.ControlModifier)
     p = img_point(v, CX, CY)
     worst = max(worst, abs(p[0] - ref[0]), abs(p[1] - ref[1]))
-check("wheel-out keeps the point under the cursor", worst < 0.5,
+check("Ctrl+wheel-out keeps the point under the cursor", worst < 0.5,
       f"worst drift {worst:.3f}px after 8 steps, scale={v.scale:.3f}")
 
 # --- anchor differs per direction: a different cursor point must matter ------
 v1 = make_view(1.0)
-wheel(v1, 240, 200, 150)
-wheel(v1, 240, 800, 550)
+wheel(v1, 240, 200, 150, Qt.ControlModifier)
+wheel(v1, 240, 800, 550, Qt.ControlModifier)
 top_left = v1.target_rect().topLeft()
 
 v2 = make_view(1.0)
-wheel(v2, 240, 800, 550)
-wheel(v2, 240, 200, 150)
+wheel(v2, 240, 800, 550, Qt.ControlModifier)
+wheel(v2, 240, 200, 150, Qt.ControlModifier)
 bottom_first = v2.target_rect().topLeft()
 check("the anchor point actually drives the result",
       abs(top_left.x() - bottom_first.x()) > 1.0,
