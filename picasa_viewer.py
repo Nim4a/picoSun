@@ -102,6 +102,30 @@ class _DecodeJob(QRunnable):
                 pass
 
 
+class _PrefetchThumb(QRunnable):
+    """Decode one neighbour's tile straight into the strip, ahead of time.
+
+    Same worker path as the strip's own _Job, but targeted: after a photo
+    lands, its neighbours are the most likely next pages. One tile each,
+    skipped if the strip already has it.
+    """
+
+    def __init__(self, preview, path: str):
+        super().__init__()
+        self.preview, self.path = preview, path
+
+    def run(self):
+        try:
+            from pv_preview import _Job
+            sig = self.preview._sig
+            is_video = self.path in getattr(self.preview, "videos", set())
+            _Job(sig, self.path, is_video).run()
+        except RuntimeError:
+            pass                  # the strip went away -- normal shutdown
+        except Exception:
+            pass
+
+
 class _Prefetch:
     """One-deep render cache for the slideshow: the NEXT photo decodes AND
     renders a beat ahead, so a tick assigns a ready pixmap instantly."""
@@ -648,6 +672,7 @@ class Viewer(QMainWindow):
             self.preview.load(self.folder)
         self.preview.reveal(path)
         QTimer.singleShot(0, self._sync_bars)
+        QTimer.singleShot(0, self._prefetch_around)
 
     def open_video(self, path: str):
         """Play a video from the strip in the photo area, Picasa-3 style."""
@@ -806,11 +831,23 @@ class Viewer(QMainWindow):
         self._scan(path)
         self._update_title()
         self.preview.reveal(path)
+        self._live_preview(path)
+
+    def _live_preview(self, path: str):
+        """Show the strip's already-decoded tile on the main stage, instantly.
+
+        The tile is small (~30px) but it is ALREADY decoded on a worker thread,
+        so showing it costs one blit, not a decode. It is replaced by the full
+        render when the settle lands (crossfade), so a fast scroll reads as a
+        smooth film roll instead of freeze-jump-freeze.
+        """
         pm = self.preview.thumb_for(path)
-        # No thumbnail on the main stage: a 140px tile blown up fullscreen,
-        # then swapped for the real render 200-400ms later, reads as a blink.
-        # The strip tile already shows "what's coming"; the main view keeps the
-        # old photo until the full render lands, then crossfades once.
+        if pm is None or pm.isNull():
+            return
+        self._img_id += 1
+        self.view.set_pixmap(pm, self._img_id, fade=False)
+        if self.view.is_fit:
+            self.view.fit()
 
     def _wheel_step(self, delta: int):
         """Page the folder on every notch, without decoding.
@@ -857,7 +894,36 @@ class Viewer(QMainWindow):
             return      # the wheel moved on; the scroll is elsewhere now
         if getattr(self.view, "_mut_id", 0) != self._settle_epoch:
             return      # the user started zooming/panning mid-decode: keep their view
+        # crossfade from the live tile (not the older photo): it is already on
+        # screen, so the sharpen reads as a focus pull, not a swap
+        self.view._prev_pm = None
+        self.view._prev_rect = None
+        self.view._fade = 1.0
         self._land_photo(path, im, meta)
+        self._prefetch_around()
+
+    def _prefetch_around(self):
+        """Decode the neighbours while the user looks at this photo.
+
+        The next wheel notch then sharpens from an already-decoded image
+        instead of waiting ~500ms -- this is what makes a big folder feel
+        instant after the first photo. Two jobs max (prev + next), skipped
+        while a gesture is running so prefetch never steals the pool from
+        the settle decode.
+        """
+        if getattr(self, "_loading", False):
+            return
+        try:
+            if self._wheel_timer.isActive():
+                return
+        except Exception:
+            pass
+        for delta in (1, -1):
+            nxt = self._step_target(delta)
+            if nxt and not self.preview.thumb_for(nxt):
+                QThreadPool.globalInstance().start(
+                    _PrefetchThumb(self.preview, nxt))
+                break
 
     def _video_set(self) -> set:
         s = getattr(self, "_vids", None)

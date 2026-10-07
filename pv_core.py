@@ -396,9 +396,16 @@ def render(base: Image.Image, d: Develop, max_side: int | None = None) -> Image.
 
 
 def estimate_preview_side(view_px: int) -> tuple[int, int]:
-    """(draft, full) long-edge sizes for interactive slider dragging vs settled."""
+    """(draft, full) long-edge sizes for interactive slider dragging vs settled.
+
+    full is deliberately SMALLER than the raw photo: the view only ever
+    shows fit-to-window, so rendering above ~2x the window is wasted work
+    (a 24MP photo down to a 1080p window throws away 90% of the pixels on
+    every page turn). RAW masters still decode full-size; this only caps
+    what gets rendered for display.
+    """
     draft = int(max(900, min(4000, view_px * 1.4)))
-    full = int(max(1600, min(6400, view_px * 2.6)))
+    full = int(max(1600, min(2800, view_px * 2.0)))
     return draft, full
 
 
