@@ -1255,7 +1255,7 @@ class Viewer(QMainWindow):
         if not overwrite:
             filt = ("JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff);;PNG (*.png);;"
                     "WebP (*.webp);;QOI lossless (*.qoi)"
-                    if ".qoi" in core.SAVE_EXTS else
+                    if ".qoi" in core.save_exts() else
                     "JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff);;PNG (*.png);;"
                     "WebP (*.webp)")
             dst, _ = QFileDialog.getSaveFileName(
@@ -1265,7 +1265,7 @@ class Viewer(QMainWindow):
             if not dst:
                 return
         ext = Path(dst).suffix.lower()
-        if ext not in core.SAVE_EXTS:
+        if ext not in core.save_exts():
             dst, ext = dst + ".jpg", ".jpg"
         try:
             if ext in (".jpg", ".jpeg"):
@@ -1502,7 +1502,7 @@ class Viewer(QMainWindow):
         if not self.meta.get("is_hdr"):
             self.status.showMessage("HDR Tone Map needs an .exr photo", 3000)
             return
-        if not core.HDR_OK:
+        if not core._mod_ok("HDR_OK", "OpenEXR"):
             self.status.showMessage("OpenEXR is not installed", 3000)
             return
         from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel,
@@ -1735,7 +1735,7 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
         QMessageBox.about(
             self, "About " + APP_NAME,
             f"<b>{APP_NAME}</b><br>Photo viewer + basic editor + RAW developer<br><br>"
-            f"RAW: {'rawpy / LibRaw available' if core.RAW_OK else 'rawpy missing — pip install rawpy'}"
+            f"RAW: {'rawpy / LibRaw available' if core._mod_ok('RAW_OK', 'rawpy') else 'rawpy missing — pip install rawpy'}"
             f"<br>HEIC: {'pillow-heif' if core.HEIF_OK else 'not available'}")
 
     # ------------------------------------------------------------- lifecycle

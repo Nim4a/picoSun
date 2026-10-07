@@ -19,7 +19,6 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
 try:
@@ -44,19 +43,44 @@ try:
 except Exception:  # pragma: no cover
     QOI_OK = False
 
-try:
-    import rawpy
 
-    RAW_OK = True
-except Exception:  # pragma: no cover
-    RAW_OK = False
+# Heavy modules (numpy, rawpy, OpenEXR) are imported only on first use so
+# launching picoSun doesn't pay their import cost up front. `_heavy` honours
+# a value already sitting in this module's globals -- the RAW tests inject
+# `core.rawpy = FakeModule` to exercise the decode path without libraw.
+_MODS: dict[str, object | None] = {}
 
-try:
-    import OpenEXR
 
-    HDR_OK = True
-except Exception:  # pragma: no cover
-    HDR_OK = False
+def _heavy(name: str):
+    """Return `name`'s module, importing it lazily (or an injected global)."""
+    g = globals()
+    if g.get(name) is not None:
+        return g[name]
+    if name not in _MODS:
+        try:
+            import importlib
+
+            _MODS[name] = importlib.import_module(name)
+            g[name] = _MODS[name]
+        except Exception:  # pragma: no cover
+            _MODS[name] = None
+    return _MODS[name]
+
+
+def _mod_ok(flag: str, mod: str) -> bool:
+    """Capability flag, lazy: True when `mod` imports (or the flag was set)."""
+    g = globals()
+    if flag in g:
+        return bool(g[flag])
+    ok = _heavy(mod) is not None
+    g[flag] = ok
+    return ok
+
+
+def save_exts() -> list[str]:
+    """Save formats actually available (QOI depends on a working import)."""
+    return [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp"] + (
+        [".qoi"] if QOI_OK else [])
 
 
 RAW_EXTS = {
@@ -81,9 +105,8 @@ IMAGE_EXTS = {
     ".wpg",
 } | RAW_EXTS
 
-# formats Qt/Pillow can save (QOI only when the plugin is present)
-SAVE_EXTS = [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp"] + (
-    [".qoi"] if QOI_OK else [])
+# formats Qt/Pillow can save (QOI only when the plugin is present) -- see
+# save_exts() for the runtime list (kept import-clean below)
 
 # icon-pack families: the installer maps each set to one doc icon
 # (photo / raw / hdr / anim). Shared here so the app and the NSI can
@@ -246,7 +269,7 @@ def decode(path: str) -> tuple[Image.Image | None, dict]:
     meta = {"is_raw": ext in RAW_EXTS}
 
     if ext in RAW_EXTS:
-        if not RAW_OK:
+        if not _mod_ok("RAW_OK", "rawpy"):
             return None, {**meta, "error": "rawpy is not installed"}
         try:
             return _decode_raw(path, meta)
@@ -254,7 +277,7 @@ def decode(path: str) -> tuple[Image.Image | None, dict]:
             return None, {**meta, "error": f"RAW decode failed: {e}"}
 
     if ext == ".exr":
-        if not HDR_OK:
+        if not _mod_ok("HDR_OK", "OpenEXR"):
             return None, {**meta, "error": "OpenEXR is not installed"}
         try:
             return _decode_hdr(path, meta)
@@ -298,6 +321,8 @@ def frame_at(path: str, index: int):
 
 
 def _decode_raw(path: str, meta: dict) -> tuple[Image.Image, dict]:
+    rawpy = _heavy("rawpy")
+    np = _heavy("numpy")
     with rawpy.imread(path) as raw:
         # 16-bit sRGB output keeps tone edits clean; size/iso come from LibRaw.
         # No use_raw_decoder kwarg: removed from rawpy's API (0.27 rejects it),
@@ -342,6 +367,8 @@ def _decode_hdr(path: str, meta: dict) -> tuple[Image.Image, dict]:
     """
     import Imath
 
+    OpenEXR = _heavy("OpenEXR")
+    np = _heavy("numpy")
     f = OpenEXR.InputFile(path)
     try:
         hdr = f.header()
@@ -377,6 +404,7 @@ def _tonemap_hdr(a: np.ndarray, exposure: float, key: float) -> Image.Image:
     brightness (measuring after the shift normalizes it straight back out,
     which made the EV slider a no-op).
     """
+    np = _heavy("numpy")
     lum_w = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     peak = max(float(np.percentile(a, 99.9)), 1e-6)
     x = np.clip(a * (2.0 ** exposure) * (key / peak), 0.0, None)
@@ -499,6 +527,7 @@ def _geometry(im: Image.Image, d: Develop) -> Image.Image:
 
 
 def _tone(im: Image.Image, d: Develop) -> Image.Image:
+    np = _heavy("numpy")
     a = np.asarray(im, dtype=np.float32) / 255.0
     lum_w = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 
@@ -540,6 +569,7 @@ def _finish(im: Image.Image, d: Develop) -> Image.Image:
         percent = int(40 + 130 * (d.sharpen / 100.0))
         im = im.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=3))
     if d.vignette > 0.5:
+        np = _heavy("numpy")
         a = np.asarray(im, dtype=np.float32) / 255.0
         H, W = a.shape[:2]
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)

@@ -109,7 +109,7 @@ draft, full = core.estimate_preview_side(1400)
 check("preview sides sane", 900 < draft < full <= 6400, f"draft={draft} full={full}")
 
 # --- RAW plumbing -----------------------------------------------------------
-check("rawpy present", core.RAW_OK)
+check("rawpy present", core._mod_ok("RAW_OK", "rawpy"))
 check("RAW ext set", {".cr2", ".nef", ".arw", ".dng"} <= core.RAW_EXTS)
 check("RAW in image exts", core.RAW_EXTS <= core.IMAGE_EXTS)
 
