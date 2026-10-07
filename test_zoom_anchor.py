@@ -20,6 +20,14 @@ from pv_view import MAX_SCALE, PhotoView
 fails = []
 
 
+_fade_log = []
+_orig_on_fade = PhotoView._on_fade
+def _logged_on_fade(self, v):
+    _fade_log.append(float(v))
+    _orig_on_fade(self, v)
+PhotoView._on_fade = _logged_on_fade
+
+
 def check(name, cond, extra=""):
     print(("PASS  " if cond else "FAIL  ") + name + (f"   {extra}" if extra else ""))
     if not cond:
@@ -145,7 +153,7 @@ check("…and goes back to where it was", w.current() == first_photo,
       Path(w.current()).name)
 w.step = origin_step
 
-# over the picture: a plain wheel pages the folder, Ctrl+wheel zooms
+# over the picture: a plain wheel zooms the photo (anchor kept under cursor)
 w.view.fit()
 for _ in range(4):
     app.processEvents()
@@ -153,12 +161,12 @@ before = w.view.scale
 steps.clear()
 on_photo = w.view.target_rect().center()
 wheel(w.view, 120, on_photo.x(), on_photo.y())
-check("plain wheel over the photo pages the folder (not zoom)",
-      bool(steps) and w.view.scale == before,
+check("plain wheel over the photo zooms, not pages",
+      not steps and w.view.scale > before,
       f"scale {before:.4f} -> {w.view.scale:.4f}, emitted {steps}")
 steps.clear()
 wheel(w.view, 120, on_photo.x(), on_photo.y(), Qt.ControlModifier)
-check("Ctrl+wheel over the photo zooms",
+check("Ctrl+wheel over the photo zooms too",
       not steps and w.view.scale > before,
       f"scale {before:.4f} -> {w.view.scale:.4f}, emitted {steps}")
 w.preview.shutdown()
@@ -324,6 +332,44 @@ check("in the real window the wheel is anchored too",
       abs(p1[0] - p0[0]) < 1.0 and abs(p1[1] - p0[1]) < 1.0,
       f"drift ({p1[0] - p0[0]:+.3f},{p1[1] - p0[1]:+.3f})")
 w.preview.shutdown()
+
+# --- mid-fade reversal: going back while a fade is running must not jump ----
+# The old timeline keeps firing its own values; if it survives the reversal it
+# snaps _fade from the reset 0.0 straight to ~0.9 on its next tick, so the
+# photo still fading suddenly jumps ("the last-second lag" on the way back).
+import time as _time
+from PySide6.QtGui import QColor as _QColor
+rv = PhotoView()
+rv.resize(800, 600)
+rv.show()
+for _ in range(4):
+    app.processEvents()
+def _solid(rgb):
+    _p = QPixmap(1200, 800)
+    _p.fill(_QColor(*rgb))
+    return _p
+_red, _blue = _solid((220, 60, 60)), _solid((60, 80, 220))
+rv.set_pixmap(_red, 1, fade=True)
+for _ in range(3):
+    app.processEvents()
+rv.set_pixmap(_blue, 2, fade=True)
+_t0 = _time.time()
+while _time.time() - _t0 < 0.06:
+    app.processEvents()
+    _time.sleep(0.005)
+rv.set_pixmap(_red, 3, fade=True)          # reversal mid-fade: A->B->A
+_n0 = len(_fade_log)
+_t0 = _time.time()
+while _time.time() - _t0 < 0.5:
+    app.processEvents()
+    _time.sleep(0.005)
+_seg = _fade_log[_n0:]
+_big = max([abs(b - a) for a, b in zip(_seg, _seg[1:])], default=0.0)
+check("mid-fade reversal has no fade-value jump", _big < 0.35,
+      f"max fade step {round(_big, 3)}")
+check("mid-fade reversal settles cleanly",
+      rv._fade == 1.0 and rv._prev_pm is None and rv._fade_anim is None,
+      f"fade={rv._fade} prev={'set' if rv._prev_pm is not None else 'clear'}")
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

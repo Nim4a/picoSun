@@ -91,7 +91,22 @@ class PhotoView(QWidget):
             # reversing mid-fade: what is on screen is a HALF-BLENDED pair.
             # Starting a fresh fade from either photo alone makes that blend
             # vanish in one frame -- the "ghost jumps away" the user saw.
-            # Snapshot the actual composite and fade from THAT.
+            # Snapshot the actual composite and fade from THAT with a FRESH
+            # 180ms animation. The old animation must be stopped first: it
+            # keeps its own timeline, so keeping it snaps _fade from the
+            # reset 0.0 straight to the old timeline's ~0.9 on the next tick
+            # -- the "still fading then suddenly jumps" on the way back.
+            old_anim, self._fade_anim = self._fade_anim, None
+            try:
+                old_anim.valueChanged.disconnect(self._on_fade)
+            except Exception:
+                pass
+            try:
+                old_anim.finished.disconnect(self._end_fade)
+            except Exception:
+                pass
+            old_anim.stop()
+            old_anim.deleteLater()
             self._prev_pm = self.grab()
             self._prev_rect = QRectF(self.rect())
             self._fade = 0.0
@@ -316,15 +331,11 @@ class PhotoView(QWidget):
         d = ev.angleDelta().y() or ev.angleDelta().x()
         if d == 0:
             return
-        if ev.modifiers() & Qt.ControlModifier:
-            # Ctrl+wheel zooms, the convention every image viewer shares
+        if self._over_photo(ev.position()):
+            # on the picture: zoom, keeping the pixel under the pointer still
             self.step_zoom(1 if d > 0 else -1, ev.position())
         else:
-            # Plain wheel walks the folder, whether the pointer is on the
-            # picture or on the letterbox around it. It used to zoom whenever
-            # the pointer was over the photo, so scrolling looked like it only
-            # blurred the image and the filmstrip never followed (no page turn
-            # had happened -- you had to click the strip to move at all).
+            # on the empty letterbox around it: walk through the folder
             self.wheelStepped.emit(1 if d < 0 else -1)
         ev.accept()
 
