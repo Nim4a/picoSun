@@ -1,4 +1,0 @@
-after first run: fs=True
-after toggle (leave): fs=False rect=1100x780
-after toggle (enter): fs=True rect=1603x902
-nav visible: True | fs_exit visible: True | chrome visible: False
