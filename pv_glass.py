@@ -41,14 +41,14 @@ def enable_acrylic(hwnd: int, tint: int = 0x3AF0F6FC) -> bool:
 
 
 def paint_glass(widget, p: QPainter,
-                scrim: QColor = QColor(14, 16, 22, 180),
-                sheen: int = 96):
-    """Liquid glass with a fixed DARK tint -- the bars never sample the photo.
+                scrim: QColor = QColor(16, 18, 24, 130),
+                sheen: int = 40):
+    """Frosted dark glass -- the bars never sample the photo.
 
-    The user's spec: real glass look (translucent dark, lit rims) on every bar,
-    and never the photo-tinted backdrop -- the blur-per-photo-change was the lag
-    and made the chrome swap colour on every image. Fixed scrim + rim light is
-    exactly that: nothing photo-dependent, nothing to recompute.
+    Frosted = dark + more transparent + weak sheen: the desktop blur shows
+    through instead of a near-opaque slab. Fixed tint always (a blur per
+    photo change was the lag, and photo-tinted chrome jumps colour on
+    every image), so nothing photo-dependent, nothing to recompute.
     """
     r = widget.rect()
     if r.isEmpty():
@@ -59,18 +59,12 @@ def paint_glass(widget, p: QPainter,
         # top sheen: light hits the upper surface -- a THIN rim, not a wash
         # over the whole bar. A tall gradient on a 32px bar was what made the
         # dark glass read as pale gray.
-        rim = min(11, max(5, h // 4))
+        rim = min(8, max(4, h // 5))
         g = QLinearGradient(0, r.top(), 0, r.top() + rim)
         g.setColorAt(0.0, QColor(255, 255, 255, sheen))
         g.setColorAt(1.0, QColor(255, 255, 255, 0))
         p.fillRect(r, g)
-        # bottom bounce: light refracting back up off the edge below
-        g2 = QLinearGradient(0, r.bottom(), 0, r.bottom() - max(12, h // 3))
-        g2.setColorAt(0.0, QColor(255, 255, 255, 64))
-        g2.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.fillRect(r, g2)
     # the glass edges: bright top rim, softer bottom rim -- this outline is what
     # makes the surface read as a pane instead of a tint
-    p.fillRect(r.left(), r.top(), r.width(), 1, QColor(255, 255, 255, 190))
-    p.fillRect(r.left(), r.top() + 1, r.width(), 1, QColor(255, 255, 255, 60))
-    p.fillRect(r.left(), r.bottom() - 1, r.width(), 1, QColor(255, 255, 255, 90))
+    p.fillRect(r.left(), r.top(), r.width(), 1, QColor(255, 255, 255, 110))
+    p.fillRect(r.left(), r.bottom() - 1, r.width(), 1, QColor(255, 255, 255, 50))

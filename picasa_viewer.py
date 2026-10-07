@@ -392,8 +392,8 @@ class Viewer(QMainWindow):
         self.showFullScreen()
         self.nav.set_mode(True)
         self._set_chrome_visible(False)
-        if not self.a_film.isChecked():
-            self.preview.hide()
+        # the photo strip stays: only the button bars go away in fullscreen
+        self.preview.setVisible(self.a_film.isChecked())
         self.view.chrome = False
         self.a_full.setChecked(True)
         self._fs_exit.show()
@@ -451,15 +451,14 @@ class Viewer(QMainWindow):
             self.showMaximized()
 
     def _set_chrome_visible(self, on: bool):
-        """Windowed mode shows the title bar, menus and status bar.
+        """Windowed mode shows the title bar, menus, status bar, nav + strip.
 
-        Fullscreen drops ALL of them -- nav bar included. The only chrome
-        left in fullscreen is the floating ✕, which leaves fullscreen (the
-        app keeps running)."""
+        Fullscreen drops the BUTTON bars (title, nav, menus, status) but
+        keeps the photo strip. The only other chrome in fullscreen is the
+        floating ✕, which leaves fullscreen (the app keeps running)."""
         self.chrome.setVisible(on)
         self.chrome.set_buttons_visible(on)
         self.nav.setVisible(on)
-        self.preview.setVisible(on and self.a_film.isChecked())
         self.mbar.setVisible(on)
         self.status.setVisible(on)
 

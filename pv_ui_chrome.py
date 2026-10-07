@@ -557,9 +557,9 @@ class NavBar(QFrame):
     def paintEvent(self, ev):
         from pv_glass import paint_glass
         p = QPainter(self)
-        # the control bar is the smoked-glass pane: darker scrim, so text stays
-        # legible while the photo still glows through
-        paint_glass(self, p, scrim=QColor(14, 16, 22, 180), sheen=84)
+        # the control bar is the frosted pane: dark translucent, photo glows
+        # through but stays readable
+        paint_glass(self, p, scrim=QColor(16, 18, 24, 130), sheen=40)
         p.end()
 
 

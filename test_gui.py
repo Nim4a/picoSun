@@ -179,7 +179,8 @@ while _t.time() < _dead and w.preview.thumb_for(w.folder[0]) is None:
     app.processEvents()
     _t.sleep(0.15)
 check("filmstrip has real pixmaps", w.preview.thumb_for(w.folder[0]) is not None)
-w.toggle_film()
+if not w.preview.isVisible():
+    w.toggle_film()
 w.toggle_edit()
 w.toggle_info()
 
@@ -194,10 +195,10 @@ for _ in range(6):
 # The bar drops controls when it is narrow, so give it a realistic fullscreen
 # width before asking whether Exit is there -- otherwise this asserts the
 # width policy instead of the fullscreen behaviour.
-# The bottom bar is GONE in fullscreen -- only the floating X stays. Hiding
-# everything with the rest of the chrome left a frameless fullscreen window
-# with no visible way out before; that is why the floating X exists, and it
-# leaves fullscreen instead of quitting the app.
+# The button bars are GONE in fullscreen -- only the floating X + the photo
+# strip stay. Hiding everything with the rest of the chrome left a frameless
+# fullscreen window with no visible way out before; that is why the floating
+# X exists, and it leaves fullscreen instead of quitting the app.
 check("fullscreen on", w.isFullScreen())
 check("title bar hidden in fullscreen (floating X replaces it)", not w.chrome.isVisible())
 check("floating exit-X visible in fullscreen", w._fs_exit.isVisible())
@@ -205,8 +206,8 @@ check("window buttons hidden in fullscreen",
       not w.chrome.btn_min.isVisible() and not w.chrome.btn_close.isVisible())
 check("top-right X leaves fullscreen, not the app",
       w._chrome_exit.__doc__ and "leaves fullscreen" in w._chrome_exit.__doc__)
-check("nav hidden in fullscreen (only the X stays)", not w.nav.isVisible())
-check("filmstrip hidden in fullscreen too", not w.preview.isVisible())
+check("nav hidden in fullscreen (only X + strip stay)", not w.nav.isVisible())
+check("photo strip STAYS in fullscreen", w.preview.isVisible())
 # the menu bar is a child of ours now, not the QMainWindow own one --
 # see test_titlebar for why it had to move
 check("menus hidden in fullscreen", not w.mbar.isVisible())
@@ -259,8 +260,8 @@ for _ in range(8):
     app.processEvents()
 check("first run opens fullscreen", w2.isFullScreen(), f"fullscreen={w2.isFullScreen()}")
 check("first run shows floating exit-X", w2._fs_exit.isVisible() or True)
-check("fullscreen hides ALL bars (only the floating X stays)",
-      not w2.nav.isVisible() and not w2.preview.isVisible()
+check("fullscreen hides button bars but keeps the photo strip",
+      not w2.nav.isVisible() and w2.preview.isVisible()
       and not w2.chrome.isVisible() and not w2.mbar.isVisible()
       and not w2.status.isVisible(),
       f"nav={w2.nav.isVisible()} preview={w2.preview.isVisible()} "
