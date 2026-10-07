@@ -1,12 +1,21 @@
 # picoSun
 
-A standalone Windows photo viewer in the spirit of Google's picoSun:
-frameless, opens fullscreen on first run, transparent letterbox with a soft drop
-shadow behind the photo, and navigation with the arrow keys. No gallery, no
-database, no face recognition — just the photo.
+A standalone Windows photo viewer in the spirit of Picasa: frameless, opens
+fullscreen, transparent letterbox with a soft drop shadow, instant-first
+loading (tile in ~0ms, master sharpens after), and cursor-anchored zoom.
+No gallery, no database — just the photo.
 
-Plus a small non-destructive editor and RAW development (CR2 / NEF / ARW / DNG /
-ORF / RW2 / RAF / PEF / SR2 and friends).
+Plus a non-destructive editor, RAW development (41 formats), HDR tone mapping,
+multi-frame navigation, and a per-format icon pack.
+
+![picoSun fullscreen](docs/screenshots/viewer-fullscreen-small.png)
+
+## Download
+
+Get the installer or portable zip from
+[Releases](https://github.com/Nim4a/picoSun/releases) — no Python needed.
+The installer adds Open With entries and a 5-icon pack (app + photo / RAW /
+HDR / animation); it never hijacks your defaults.
 
 ## Run it
 
@@ -126,6 +135,12 @@ always a wheel meant for the photo behind it.
 | Home / End | first / last photo |
 | wheel, + / - | zoom at the cursor (the pixel under the pointer stays put) |
 | 0 / 1 | fit window / actual size |
+| W / H | scale to width / height |
+| Shift+F | scale to fill |
+| L | lock zoom — next photo keeps this zoom |
+| K | color picker (click copies #hex) |
+| T | HDR tone map (on .exr photos) |
+| . / , | next / previous animation frame |
 | click | toggle fit ↔ 100% |
 | double-click | leave fullscreen first, then toggle fit ↔ 100% |
 | drag | pan |
@@ -153,7 +168,9 @@ Detail — unsharp-mask sharpening.
 
 Ctrl+Z undoes, Ctrl+C / Ctrl+V copies the whole adjustment set between photos,
 Ctrl+S saves a copy, Ctrl+Shift+S overwrites in place. RAW files are never written
-back as RAW — Save As writes JPEG / TIFF / PNG / WebP instead.
+back as RAW — Save As writes JPEG / TIFF / PNG / WebP / QOI instead.
+Resize applies once at save time (long edge in px). Export Frames saves every
+animation frame as PNGs next to the photo.
 
 ## RAW
 
@@ -163,18 +180,14 @@ recovery work on RAW with real headroom, not on an already-compressed JPEG.
 Camera, lens, ISO, shutter, aperture and focal length come from LibRaw's metadata
 and show in the info panel.
 
-## HEIC / HEIF and AVIF
+## Formats
 
-`pillow-heif` registers a Pillow opener for HEIC, HEIF and AVIF, so phone photos
-decode like any other file — master, thumbnails, zoom and the edit pipeline all
-work on them, and they can be saved out as JPEG/TIFF/PNG/WebP.
+96 stills + 41 RAW + 16 video (ffmpeg frames): JPG, PNG, GIF/APNG, WebP,
+TIFF, HEIC/HEIF/AVIF, JXL, QOI, CR2/CR3, NEF, ARW, DNG, ORF, RW2, RAF, PEF,
+SRW, EXR (filmic tone-mapped), and the ImageGlass list. Explorer sort order.
+Bad files skip silently while paging, dialog only on explicit open.
 
-The plugin and the libraries it needs (`libheif`, `libde265`, `libx265`) are
-bundled into the standalone build, so HEIC works in the exe with no extra
-install. No PyInstaller hook exists for `pillow_heif` and none is needed — the
-default analysis puts the package in the archive and picks up the shared
-libraries through the extension module. `Help ▸ About` reports whether the plugin
-loaded, which separates "this file is unsupported" from "the plugin is missing".
+![icon pack](docs/screenshots/icon-pack.png)
 
 ## The window owns the mouse everywhere
 
@@ -223,6 +236,8 @@ carry nothing but the picture.
 | `pv_preview.py` | the bottom preview strip: thumbnails, ffmpeg frames, wheel scroll |
 | `pv_ui_chrome.py` | title strip, nav bar, info panel |
 | `pv_ui_common.py` | PIL↔QPixmap, byte formatting |
+| `icons/` | app + per-format icon pack (photo / raw / hdr / anim) |
+| `installer/picoSun.nsi` | NSIS user-level installer + OpenWith associations |
 
 Render order: geometry → exposure → white balance → highlights/shadows →
 contrast → saturation/B&W → sharpen → vignette. Steps whose parameters are all at
@@ -260,6 +275,8 @@ run_tests.bat
   its first media file (photos before videos, natural order), a media file to
   itself, a text file to nothing — plus one check that the window really loads
   the whole folder rather than a single file.
+
+10 suites, all green.
 
 `heictest/` holds a synthetic HEIC fixture — a red|blue split with a yellow disc,
 chosen so a screenshot or a pixel probe can tell it apart from any other image
