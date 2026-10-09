@@ -223,6 +223,10 @@ class Viewer(QMainWindow):
         # desktop glowing faintly through -- frosted glass, not black slab.
         # (Fully opaque dark was the "black and dull" complaint.)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # native Windows-11 liquid glass (live acrylic): DWM blurs whatever
+        # sits behind the window in real time (GPU, zero cost to the app).
+        # Enabled on first show; paintEvent draws only the rim light on top.
+        self._acrylic_on = False
         self.setMinimumSize(560, 380)
         self.settings = self.SETTINGS or QSettings(APP_NAME, APP_NAME)
 
@@ -1650,23 +1654,70 @@ Drag &amp; drop a photo onto the window, or Ctrl+O
             f"<br>HEIC: {'pillow-heif' if core.HEIF_OK else 'not available'}")
 
     # ------------------------------------------------------------- lifecycle
-    def paintEvent(self, ev):
-        """Clear glass: wallpaper shows straight through, clicks stay ours.
+    def _enable_acrylic(self):
+        """Windows-11 liquid glass: live blur-behind via DWM.
 
-        Alpha 1 is invisible over any wallpaper but keeps every pixel
-        hit-testable: with alpha 0 the clicks fall through to whatever is
-        behind the app (the click-through complaint). Only the photo, bars
-        and tiles paint themselves; everything else is clear glass.
+        SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND) blurs whatever
+        sits behind the window in real time — live, on the GPU, and it works
+        on layered windows (the documented DwmEnableBlurBehindWindow does
+        NOT). WA_TranslucentBackground keeps per-pixel alpha for the bars.
         """
-        from PySide6.QtGui import QPainter, QColor
+        import ctypes
+        from ctypes import wintypes
+
+        class ACCENT_POLICY(ctypes.Structure):
+            _fields_ = [("AccentState", wintypes.DWORD),
+                        ("AccentFlags", wintypes.DWORD),
+                        ("GradientColor", wintypes.DWORD),
+                        ("AnimationId", wintypes.DWORD)]
+
+        class WCAD(ctypes.Structure):
+            _fields_ = [("Attribute", wintypes.DWORD),
+                        ("Data", ctypes.c_void_p),
+                        ("SizeOfData", ctypes.c_size_t)]
+
+        accent = ACCENT_POLICY()
+        accent.AccentState = 3                      # ACCENT_ENABLE_BLURBEHIND
+        # 0x01000000 = alpha 1 (tint-free): the wallpaper shows at ~full
+        # strength through the blur — clear liquid glass, no dark slab
+        accent.GradientColor = 0x01000000
+        accent.AccentFlags = 2
+        data = WCAD()
+        data.Attribute = 19                         # WCA_ACCENT_POLICY
+        data.Data = ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p)
+        data.SizeOfData = ctypes.sizeof(ACCENT_POLICY)
+        try:
+            ok = ctypes.windll.user32.SetWindowCompositionAttribute(
+                int(self.winId()), ctypes.byref(data))
+            self._acrylic_on = bool(ok)
+        except Exception:
+            self._acrylic_on = False
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        if not self._acrylic_on:
+            self._enable_acrylic()
+
+    def paintEvent(self, ev):
+        """Liquid glass: live acrylic behind + rim light, clicks stay ours.
+
+        The acrylic blur (DWM, live) shows where the window is transparent;
+        the alpha-1 fill keeps every pixel hit-testable (with alpha 0 clicks
+        fall through — the old complaint). The 2px side rails + top sheen
+        give the glass its edge read over any wallpaper.
+        """
+        from PySide6.QtGui import QPainter, QColor, QLinearGradient
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(0, 0, 0, 1))
-        # 2px vertical frame on the left/right edges so the app reads as a
-        # distinct window even when the photo is small (mild translucent
-        # white — invisible over nothing, pops over any wallpaper).
+        # rim: 2px vertical rails left/right (the existing frame) plus a
+        # faint top sheen so the glass reads lit from above
         c = QColor(255, 255, 255, 96)
         p.fillRect(0, 0, 2, self.height(), c)
         p.fillRect(self.width() - 2, 0, 2, self.height(), c)
+        sheen = QLinearGradient(0, 0, 0, 3)
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 70))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.fillRect(0, 0, self.width(), 3, sheen)
 
     def closeEvent(self, ev):
         try:
